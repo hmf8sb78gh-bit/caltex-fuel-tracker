@@ -1,0 +1,154 @@
+{
+  "source": "香港消費者委員會油價資訊通",
+  "source_url": "https://www.consumer.org.hk/pricewatch/oilwatch/opendata/oilprice.json",
+  "fetched_at_hkt": "2026-09-08T05:17:44+08:00",
+  "data": [
+    {
+      "type": {
+        "en": "Standard Petrol",
+        "tc": "無鉛汽油",
+        "sc": "无铅汽油"
+      },
+      "prices": [
+        {
+          "vendor": {
+            "en": "Sinopec",
+            "tc": "中石化",
+            "sc": "中石化"
+          },
+          "price": "32.67"
+        },
+        {
+          "vendor": {
+            "en": "PetroChina",
+            "tc": "中國石油",
+            "sc": "中国石油"
+          },
+          "price": "32.67"
+        },
+        {
+          "vendor": {
+            "en": "Caltex",
+            "tc": "加德士",
+            "sc": "加德士"
+          },
+          "price": "32.67"
+        },
+        {
+          "vendor": {
+            "en": "Esso",
+            "tc": "埃索",
+            "sc": "埃索"
+          },
+          "price": "32.67"
+        },
+        {
+          "vendor": {
+            "en": "Shell",
+            "tc": "蜆殼",
+            "sc": "蚬壳"
+          },
+          "price": "32.67"
+        }
+      ]
+    },
+    {
+      "type": {
+        "en": "Premium Petrol",
+        "tc": "特級無鉛汽油",
+        "sc": "特级无铅汽油"
+      },
+      "prices": [
+        {
+          "vendor": {
+            "en": "Sinopec",
+            "tc": "中石化",
+            "sc": "中石化"
+          },
+          "price": "34.47"
+        },
+        {
+          "vendor": {
+            "en": "PetroChina",
+            "tc": "中國石油",
+            "sc": "中国石油"
+          },
+          "price": "34.47"
+        },
+        {
+          "vendor": {
+            "en": "Caltex",
+            "tc": "加德士",
+            "sc": "加德士"
+          },
+          "price": "34.47"
+        },
+        {
+          "vendor": {
+            "en": "Esso",
+            "tc": "埃索",
+            "sc": "埃索"
+          },
+          "price": "34.47"
+        },
+        {
+          "vendor": {
+            "en": "Shell",
+            "tc": "蜆殼",
+            "sc": "蚬壳"
+          },
+          "price": "34.47"
+        }
+      ]
+    },
+    {
+      "type": {
+        "en": "Diesel",
+        "tc": "柴油",
+        "sc": "柴油"
+      },
+      "prices": [
+        {
+          "vendor": {
+            "en": "Sinopec",
+            "tc": "中石化",
+            "sc": "中石化"
+          },
+          "price": "36.53"
+        },
+        {
+          "vendor": {
+            "en": "PetroChina",
+            "tc": "中國石油",
+            "sc": "中国石油"
+          },
+          "price": "36.53"
+        },
+        {
+          "vendor": {
+            "en": "Caltex",
+            "tc": "加德士",
+            "sc": "加德士"
+          },
+          "price": "36.53"
+        },
+        {
+          "vendor": {
+            "en": "Esso",
+            "tc": "埃索",
+            "sc": "埃索"
+          },
+          "price": "36.53"
+        },
+        {
+          "vendor": {
+            "en": "Shell",
+            "tc": "蜆殼",
+            "sc": "蚬壳"
+          },
+          "price": "36.53"
+        }
+      ]
+    }
+  ]
+}
