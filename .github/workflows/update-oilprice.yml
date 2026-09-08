@@ -1,13 +1,20 @@
-name: Update oil price data
+name: Update Oil Price
 
 on:
   schedule:
-    # 每日香港時間 06:10 執行，即 UTC 22:10
-    - cron: "10 22 * * *"
+    # 每 5 分鐘檢查一次
+    # GitHub Actions cron 使用 UTC 時間
+    - cron: "*/5 * * * *"
+
+  # 可以手動按 Run workflow
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: update-oilprice
+  cancel-in-progress: false
 
 jobs:
   update-oilprice:
@@ -17,59 +24,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create data directory
-        run: mkdir -p data
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-      - name: Download Consumer Council oil price JSON
+      - name: Install dependencies
         run: |
-          curl -L \
-            --retry 3 \
-            --retry-delay 10 \
-            --fail \
-            --user-agent "Mozilla/5.0" \
-            --header "Accept: application/json,text/plain,*/*" \
-            "https://www.consumer.org.hk/pricewatch/oilwatch/opendata/oilprice.json" \
-            -o data/oilprice.raw.json
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Validate JSON
+      - name: Run oil price updater
         run: |
-          python3 -m json.tool data/oilprice.raw.json > data/oilprice.formatted.json
+          python scripts/update_oilprice.py
 
-      - name: Add metadata
+      - name: Commit and push only if oilprice.json changed
         run: |
-          python3 <<'PY'
-          import json
-          from datetime import datetime, timezone, timedelta
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
 
-          hk_tz = timezone(timedelta(hours=8))
-
-          with open("data/oilprice.formatted.json", "r", encoding="utf-8") as f:
-              payload = json.load(f)
-
-          wrapped = {
-              "source": "香港消費者委員會油價資訊通",
-              "source_url": "https://www.consumer.org.hk/pricewatch/oilwatch/opendata/oilprice.json",
-              "fetched_at_hkt": datetime.now(hk_tz).isoformat(timespec="seconds"),
-              "data": payload
-          }
-
-          with open("data/oilprice.json", "w", encoding="utf-8") as f:
-              json.dump(wrapped, f, ensure_ascii=False, indent=2)
-          PY
-
-      - name: Clean temporary files
-        run: |
-          rm -f data/oilprice.raw.json data/oilprice.formatted.json
-
-      - name: Commit and push if changed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/oilprice.json
 
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "No oil price changes. Nothing to commit."
           else
             git commit -m "Update oil price data"
+            git pull --rebase
             git push
           fi
