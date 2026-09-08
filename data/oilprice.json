@@ -1,7 +1,7 @@
 {
   "source": "香港消費者委員會油價資訊通",
   "source_url": "https://www.consumer.org.hk/pricewatch/oilwatch/opendata/oilprice.json",
-  "fetched_at_hkt": "2026-09-08T06:19:17+08:00",
+  "fetched_at_hkt": "2026-09-08T17:22:47+08:00",
   "data": [
     {
       "type": {
@@ -48,7 +48,7 @@
             "tc": "蜆殼",
             "sc": "蚬壳"
           },
-          "price": "32.67"
+          "price": "32.92"
         }
       ]
     },
@@ -97,7 +97,7 @@
             "tc": "蜆殼",
             "sc": "蚬壳"
           },
-          "price": "34.47"
+          "price": "34.72"
         }
       ]
     },
@@ -146,7 +146,7 @@
             "tc": "蜆殼",
             "sc": "蚬壳"
           },
-          "price": "36.53"
+          "price": "36.83"
         }
       ]
     }
