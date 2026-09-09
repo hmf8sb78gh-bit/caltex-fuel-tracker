@@ -40,16 +40,18 @@ def get_existing_price(existing, fuel_key):
 def extract_caltex_prices(text):
     clean = re.sub(r"\s+", " ", text)
 
-    # ========== 1. 白金（特級無鉛汽油） ==========
-    # 精準錨定：特級無鉛汽油 → 價格表表頭 → 加德士 → 第一個價=零售牌價
-    platinum_pattern = r"特級無鉛汽油.*?零售牌價 折後價 門市折扣.*?加德士.*?(\d{2}\.\d{2})"
+    # ========== 1. 先提取白金（特級無鉛汽油）零售牌價 ==========
+    platinum_pattern = r"特級無鉛汽油.*?加德士.*?(\d{2}\.\d{2})"
     platinum_match = re.search(platinum_pattern, clean, flags=re.DOTALL)
     platinum_retail = float(platinum_match.group(1)) if platinum_match else None
 
-    # ========== 2. 黃金（普通無鉛汽油） ==========
-    # 負向斷言：(?<!特級) 確保只匹配「前面冇特級」嘅無鉛汽油，絕唔會撈到白金
-    gold_pattern = r"(?<!特級)無鉛汽油.*?零售牌價 折後價 門市折扣.*?加德士.*?(\d{2}\.\d{2})"
-    gold_match = re.search(gold_pattern, clean, flags=re.DOTALL)
+    # ========== 2. 徹底刪除所有特級無鉛相關內容 ==========
+    # 把「特級無鉛汽油」開頭到整個文檔結尾全部刪掉，剩下的就只有普通無鉛汽油
+    clean_gold_section = re.sub(r"特級無鉛汽油.*", "", clean, flags=re.DOTALL)
+
+    # ========== 3. 在剩下的文本裡提取黃金（普通無鉛）零售牌價 ==========
+    gold_pattern = r"無鉛汽油.*?加德士.*?(\d{2}\.\d{2})"
+    gold_match = re.search(gold_pattern, clean_gold_section, flags=re.DOTALL)
     gold_retail = float(gold_match.group(1)) if gold_match else None
 
     print(f"黃金零售牌價: {gold_retail}")
@@ -100,9 +102,11 @@ def main():
         if gold_price is None or platinum_price is None:
             raise ValueError("未能從頁面抽取加德士黃金 / 白金油價")
 
-        # 價格合理性校驗
+        # 雙重校驗：價格區間 + 白金一定比黃金貴
         if not (30 < gold_price < 36 and 32 < platinum_price < 38):
             raise ValueError(f"提取價格異常：黃金 {gold_price} / 白金 {platinum_price}")
+        if gold_price >= platinum_price:
+            raise ValueError(f"價格順序錯誤：黃金({gold_price}) 不應高於白金({platinum_price})")
 
         old_gold = get_existing_price(existing, "gold")
         old_platinum = get_existing_price(existing, "platinum")
