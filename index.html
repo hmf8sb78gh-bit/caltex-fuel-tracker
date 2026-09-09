@@ -538,11 +538,11 @@
         <div>
           <label for="voucher">油券</label>
           <select id="voucher">
-            <option value="50">入滿$350減$50</option>
-            <option value="40">入滿$350減$40</option>
-            <option value="30">入滿$350減$30</option>
+            <option value="50">每滿$350減$50（可疊加）</option>
+            <option value="40">每滿$350減$40（可疊加）</option>
+            <option value="30">每滿$350減$30（可疊加）</option>
             <option value="0">沒有油券</option>
-            <option value="custom">自訂油券（同樣須滿$350）</option>
+            <option value="custom">自訂油券面額（每滿$350一張）</option>
           </select>
           <div class="voucher-hint" id="voucherHint"></div>
         </div>
@@ -617,7 +617,7 @@
   <script>
     const OIL_PRICE_API_URL = "./data/oilprice.json";
     const STORAGE_KEY = "caltexCalcStateV8";
-    const VOUCHER_THRESHOLD = 350; // 規矩 A：全部油券都要牌價總額滿 HK$350 先減
+    const VOUCHER_STEP = 350; // 每滿 HK$350 牌價總額疊一張油券（張數 = floor(牌價總額 / 350)）
 
     const DEFAULT_PRICES = {
       gold: null,
@@ -858,40 +858,54 @@
 
     function calculateEffectiveValues() {
       const pumpPrice = getCurrentPumpPrice();
-      const cardDiscount = getDiscountPerLitre();
+      const cardDiscount = getDiscountPerLitre(); // 折扣卡基本折扣 HK$/升
       const litres = numberValue(els.litres, 0);
-      const nominalVoucher = getVoucherAmount();
+      const voucherPerSheet = getVoucherAmount(); // 單張油券面額
+
+      const empty = {
+        pumpPrice,
+        cardDiscount,
+        litres,
+        voucherPerSheet,
+        voucherSheets: 0,
+        voucher: 0,
+        listTotal: NaN,
+        billedAmount: NaN,
+        billedLitres: NaN,
+        cardDiscountTotal: NaN,
+        cardNetPerLitre: NaN,
+        payable: NaN,
+        realPerLitre: NaN
+      };
 
       if (!Number.isFinite(pumpPrice) || pumpPrice <= 0) {
-        return {
-          pumpPrice,
-          cardDiscount,
-          litres,
-          voucher: 0,
-          nominalVoucher,
-          listTotal: NaN,
-          voucherApplied: false,
-          threshold: VOUCHER_THRESHOLD,
-          cardNetPerLitre: NaN,
-          grossAfterCard: NaN,
-          payable: NaN,
-          realPerLitre: NaN
-        };
+        return empty;
       }
 
       const safeLitres = Math.max(0, litres);
-      const listTotal = pumpPrice * safeLitres;                 // 牌價總額（油券門檻基準）
+
+      // ① 牌價總額 gross = 牌價 × 實際入油量
+      const listTotal = pumpPrice * safeLitres;
+
+      // ② 油券：每滿 HK$350 一張、可疊加，張數 = floor(gross / 350)
+      const voucherSheets =
+        voucherPerSheet > 0 && listTotal > 0
+          ? Math.floor(listTotal / VOUCHER_STEP)
+          : 0;
+      const voucher = voucherSheets * voucherPerSheet;
+
+      // ③ 計入帳單金額 = gross − 油券；計入帳單入油量 = 計入帳單金額 / 牌價
+      const billedAmount = Math.max(0, listTotal - voucher);
+      const billedLitres = billedAmount / pumpPrice;
+
+      // ④ 卡折 = 基本折扣/升 × 計入帳單入油量（油券墊住嘅部份唔再享卡折扣）
       const cardNetPerLitre = Math.max(0, pumpPrice - cardDiscount);
-      const grossAfterCard = Math.max(0, cardNetPerLitre * safeLitres);
+      const cardDiscountTotal = cardDiscount * billedLitres;
 
-      /*
-        規矩 A：以「牌價總額」判斷，要 >= HK$350 先用得油券；
-        唔夠門檻就算揀咗券都唔減。實際每升 = 實付金額 / 入油量。
-      */
-      const voucherApplied = nominalVoucher > 0 && listTotal >= VOUCHER_THRESHOLD;
-      const voucher = voucherApplied ? nominalVoucher : 0;
+      // ⑤ 應付金額 = 計入帳單金額 − 卡折
+      const payable = Math.max(0, billedAmount - cardDiscountTotal);
 
-      const payable = Math.max(0, grossAfterCard - voucher);
+      // ⑥ 最終油價（實際每升）= 應付金額 / 實際入油量
       const realPerLitre =
         safeLitres > 0 ? payable / safeLitres : cardNetPerLitre;
 
@@ -899,13 +913,14 @@
         pumpPrice,
         cardDiscount,
         litres,
+        voucherPerSheet,
+        voucherSheets,
         voucher,
-        nominalVoucher,
         listTotal,
-        voucherApplied,
-        threshold: VOUCHER_THRESHOLD,
+        billedAmount,
+        billedLitres,
+        cardDiscountTotal,
         cardNetPerLitre,
-        grossAfterCard,
         payable,
         realPerLitre
       };
@@ -915,24 +930,28 @@
       const hint = els.voucherHint;
       if (!hint) return;
 
-      if (!Number.isFinite(values.listTotal) || !(values.nominalVoucher > 0)) {
+      if (!Number.isFinite(values.listTotal) || !(values.voucherPerSheet > 0)) {
         hint.textContent = "";
         hint.className = "voucher-hint";
         return;
       }
 
-      if (values.voucherApplied) {
-        hint.textContent =
+      if (values.voucherSheets > 0) {
+        const remainder = VOUCHER_STEP - (values.listTotal % VOUCHER_STEP);
+        let text =
           "牌價總額 HK$" + values.listTotal.toFixed(2) +
-          "，已滿 HK$" + values.threshold.toFixed(0) +
-          "，油券 HK$" + values.voucher.toFixed(2) + " 已套用。";
+          "，每滿 HK$350 一張，共用 " + values.voucherSheets +
+          " 張、共減 HK$" + values.voucher.toFixed(2) + "。";
+        if (remainder > 0.01) {
+          text += " 再入約 HK$" + remainder.toFixed(2) + " 牌價可多疊一張。";
+        }
+        hint.textContent = text;
         hint.className = "voucher-hint";
       } else {
-        const diff = values.threshold - values.listTotal;
+        const diff = VOUCHER_STEP - values.listTotal;
         hint.textContent =
           "牌價總額 HK$" + values.listTotal.toFixed(2) +
-          "，未滿 HK$" + values.threshold.toFixed(0) +
-          "（差 HK$" + diff.toFixed(2) + "），油券暫不適用。";
+          "，未滿 HK$350（差 HK$" + diff.toFixed(2) + "），暫未用券。";
         hint.className = "voucher-hint warn";
       }
     }
