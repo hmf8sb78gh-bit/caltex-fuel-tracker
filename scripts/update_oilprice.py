@@ -37,20 +37,54 @@ def get_existing_price(existing, fuel_key):
         return None
 
 
-def extract_price(text, fuel_keywords):
+def extract_caltex_prices(text):
     clean = re.sub(r"\s+", " ", text)
 
-    patterns = [
-        r"加德士.*?" + r".*?".join(fuel_keywords) + r".*?(\d{2}\.\d{2})",
-        r"Caltex.*?" + r".*?".join(fuel_keywords) + r".*?(\d{2}\.\d{2})",
-    ]
+    print("===== PAGE TEXT START =====")
+    print(clean[:3000])
+    print("===== PAGE TEXT END =====")
 
-    for pattern in patterns:
-        match = re.search(pattern, clean, re.IGNORECASE)
-        if match:
-            return float(match.group(1))
+    caltex_index = clean.find("加德士")
+    if caltex_index == -1:
+        caltex_index = clean.lower().find("caltex")
 
-    return None
+    print("Caltex index:", caltex_index)
+
+    if caltex_index != -1:
+        nearby = clean[caltex_index:caltex_index + 2000]
+        print("===== CALTEX NEARBY TEXT START =====")
+        print(nearby)
+        print("===== CALTEX NEARBY TEXT END =====")
+
+        nearby_prices = re.findall(r"\b\d{2}\.\d{2}\b", nearby)
+        nearby_prices = [float(p) for p in nearby_prices if 15 <= float(p) <= 40]
+
+        unique = []
+        for p in nearby_prices:
+            if p not in unique:
+                unique.append(p)
+
+        print("Nearby prices:", unique)
+
+        if len(unique) >= 2:
+            sorted_prices = sorted(unique)
+            return sorted_prices[0], sorted_prices[-1]
+
+    all_prices = re.findall(r"\b\d{2}\.\d{2}\b", clean)
+    all_prices = [float(p) for p in all_prices if 15 <= float(p) <= 40]
+
+    unique = []
+    for p in all_prices:
+        if p not in unique:
+            unique.append(p)
+
+    print("All prices:", unique)
+
+    if len(unique) >= 2:
+        sorted_prices = sorted(unique)
+        return sorted_prices[0], sorted_prices[-1]
+
+    return None, None
 
 
 def build_payload(gold_price, platinum_price):
@@ -76,29 +110,24 @@ def main():
     ensure_data_folder()
     existing = load_existing()
 
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "zh-HK,zh;q=0.9,en;q=0.8",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache"
-    }
-
     try:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0 Safari/537.36"
+            ),
+            "Accept-Language": "zh-HK,zh;q=0.9,en;q=0.8",
+        }
+
         response = requests.get(SOURCE_URL, headers=headers, timeout=30)
         response.raise_for_status()
 
         text = response.text
-
-        gold_price = extract_price(text, ["黃金", "Gold"])
-        platinum_price = extract_price(text, ["白金", "Platinum"])
+        gold_price, platinum_price = extract_caltex_prices(text)
 
         if gold_price is None or platinum_price is None:
-            raise ValueError("未能從消委會網頁抽取加德士黃金 / 白金油價")
+            raise ValueError("未能從頁面抽取加德士黃金 / 白金油價")
 
         old_gold = get_existing_price(existing, "gold")
         old_platinum = get_existing_price(existing, "platinum")
@@ -120,12 +149,10 @@ def main():
     except Exception as e:
         print("Update failed:", str(e))
 
-        # 如果已有舊資料，失敗時唔覆蓋舊 JSON
         if existing:
             print("Keeping existing oilprice.json.")
             return
 
-        # 如果完全無舊資料，先寫入 error JSON
         payload = {
             "source": "香港消費者委員會油價資訊通",
             "source_url": SOURCE_URL,
