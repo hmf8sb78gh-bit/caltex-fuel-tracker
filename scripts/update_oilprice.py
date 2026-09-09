@@ -1,3 +1,4 @@
+import html as html_lib
 import json
 import os
 import re
@@ -8,6 +9,15 @@ import requests
 
 OUTPUT_PATH = "data/oilprice.json"
 SOURCE_URL = "https://oil-price.consumer.org.hk/tc"
+
+# 兩張「每升汽油價格比較」表嘅表頭（可見文字、順序固定：零售牌價 → 折後價 → 門市折扣）
+# 用表頭做錨點，先切開兩張表，再喺各自區間搵加德士，就唔會互相踩。
+GOLD_TABLE_HEADER = "無鉛汽油 零售牌價 折後價 門市折扣"
+PLATINUM_TABLE_HEADER = "特級無鉛汽油 零售牌價 折後價 門市折扣"
+TABLE_END_MARKER = "使用須知"
+
+# 加德士一列：加德士 $零售牌價 $折後價 (-門市折扣)
+CALTEX_ROW = r"加德士\s*\$?\s*(\d{2}\.\d{2})\s*\$?\s*(\d{2}\.\d{2})"
 
 
 def now_hkt():
@@ -22,7 +32,6 @@ def ensure_data_folder():
 def load_existing():
     if not os.path.exists(OUTPUT_PATH):
         return None
-
     try:
         with open(OUTPUT_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -37,26 +46,47 @@ def get_existing_price(existing, fuel_key):
         return None
 
 
-def extract_caltex_prices(text):
-    clean = re.sub(r"\s+", " ", text)
+def to_visible_text(raw_html):
+    """去掉 script/style 同所有 HTML 標籤、還原 entity，再壓成單行可見文字。"""
+    t = re.sub(r"<script.*?</script>", " ", raw_html, flags=re.S | re.I)
+    t = re.sub(r"<style.*?</style>", " ", t, flags=re.S | re.I)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = html_lib.unescape(t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
 
-    # ========== 1. 先提取白金（特級無鉛汽油）零售牌價 ==========
-    platinum_pattern = r"特級無鉛汽油.*?加德士.*?(\d{2}\.\d{2})"
-    platinum_match = re.search(platinum_pattern, clean, flags=re.DOTALL)
-    platinum_retail = float(platinum_match.group(1)) if platinum_match else None
 
-    # ========== 2. 徹底刪除所有特級無鉛相關內容 ==========
-    # 把「特級無鉛汽油」開頭到整個文檔結尾全部刪掉，剩下的就只有普通無鉛汽油
-    clean_gold_section = re.sub(r"特級無鉛汽油.*", "", clean, flags=re.DOTALL)
+def _caltex_retail(block, label):
+    """喺指定表格區間入面搵加德士列，回傳（零售牌價, 折後價）。"""
+    m = re.search(CALTEX_ROW, block)
+    if not m:
+        raise ValueError(f"喺【{label}】表格區間搵唔到加德士嗰列，頁面結構可能已改動")
+    retail, discounted = float(m.group(1)), float(m.group(2))
+    if not (retail > discounted > 0):
+        raise ValueError(f"【{label}】零售牌價({retail})應高於折後價({discounted})，抽取異常")
+    return retail, discounted
 
-    # ========== 3. 在剩下的文本裡提取黃金（普通無鉛）零售牌價 ==========
-    gold_pattern = r"無鉛汽油.*?加德士.*?(\d{2}\.\d{2})"
-    gold_match = re.search(gold_pattern, clean_gold_section, flags=re.DOTALL)
-    gold_retail = float(gold_match.group(1)) if gold_match else None
 
-    print(f"黃金零售牌價: {gold_retail}")
-    print(f"白金零售牌價: {platinum_retail}")
+def extract_caltex_prices(raw_html):
+    text = to_visible_text(raw_html)
 
+    # 1. 用表頭定位兩張比較表（必須黃金表喺前、白金表喺後）
+    g_idx = text.find(GOLD_TABLE_HEADER)
+    p_idx = text.find(PLATINUM_TABLE_HEADER)
+    if g_idx == -1 or p_idx == -1 or not (g_idx < p_idx):
+        raise ValueError("搵唔到『無鉛 / 特級無鉛』兩張比較表表頭，停止更新以免寫錯價")
+
+    # 2. 切成互不相疊嘅區間：黃金表 = [黃金表頭, 白金表頭)；白金表 = [白金表頭, 使用須知)
+    end_idx = text.find(TABLE_END_MARKER, p_idx)
+    gold_block = text[g_idx:p_idx]
+    platinum_block = text[p_idx:end_idx if end_idx != -1 else len(text)]
+
+    # 3. 每個區間各自搵加德士（group(1) 係零售牌價，先後順序已被表頭鎖死）
+    gold_retail, gold_disc = _caltex_retail(gold_block, "黃金(普通無鉛)")
+    platinum_retail, platinum_disc = _caltex_retail(platinum_block, "白金(特級無鉛)")
+
+    print(f"黃金 零售牌價: {gold_retail}（折後 {gold_disc}）")
+    print(f"白金 零售牌價: {platinum_retail}（折後 {platinum_disc}）")
     return gold_retail, platinum_retail
 
 
@@ -96,17 +126,13 @@ def main():
         response = requests.get(SOURCE_URL, headers=headers, timeout=30)
         response.raise_for_status()
 
-        text = response.text
-        gold_price, platinum_price = extract_caltex_prices(text)
+        gold_price, platinum_price = extract_caltex_prices(response.text)
 
-        if gold_price is None or platinum_price is None:
-            raise ValueError("未能從頁面抽取加德士黃金 / 白金油價")
-
-        # 雙重校驗：價格區間 + 白金一定比黃金貴
-        if not (30 < gold_price < 36 and 32 < platinum_price < 38):
-            raise ValueError(f"提取價格異常：黃金 {gold_price} / 白金 {platinum_price}")
+        # 雙重校驗：合理區間 + 白金一定貴過黃金
+        if not (28 < gold_price < 38 and 30 < platinum_price < 42):
+            raise ValueError(f"提取價格超出合理區間：黃金 {gold_price} / 白金 {platinum_price}")
         if gold_price >= platinum_price:
-            raise ValueError(f"價格順序錯誤：黃金({gold_price}) 不應高於白金({platinum_price})")
+            raise ValueError(f"價格順序錯誤：黃金({gold_price}) 不應高於或等於白金({platinum_price})")
 
         old_gold = get_existing_price(existing, "gold")
         old_platinum = get_existing_price(existing, "platinum")
