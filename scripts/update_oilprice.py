@@ -40,51 +40,32 @@ def get_existing_price(existing, fuel_key):
 def extract_caltex_prices(text):
     clean = re.sub(r"\s+", " ", text)
 
-    print("===== PAGE TEXT START =====")
-    print(clean[:3000])
-    print("===== PAGE TEXT END =====")
+    # ========== 1. 提取白金（特級無鉛汽油）零售牌價 ==========
+    # 頁面結構：特級無鉛汽油 → 加德士 → 第一個價 = 零售牌價，第二個價 = 折後價
+    platinum_pattern = r"特級無鉛汽油.*?加德士.*?(\d{2}\.\d{2}).*?(\d{2}\.\d{2})"
+    platinum_match = re.search(platinum_pattern, clean, flags=re.DOTALL)
+    platinum_retail = None
+    if platinum_match:
+        platinum_retail = float(platinum_match.group(1))  # 第一個 = 零售牌價
 
-    caltex_index = clean.find("加德士")
-    if caltex_index == -1:
-        caltex_index = clean.lower().find("caltex")
+    # ========== 2. 提取黃金（普通無鉛汽油）零售牌價 ==========
+    # 先刪走「特級無鉛汽油」整段，避免關鍵詞混淆匹配錯
+    clean_without_platinum = re.sub(
+        r"特級無鉛汽油.*?(?=無鉛汽油|$)",
+        "",
+        clean,
+        flags=re.DOTALL
+    )
+    gold_pattern = r"無鉛汽油.*?加德士.*?(\d{2}\.\d{2}).*?(\d{2}\.\d{2})"
+    gold_match = re.search(gold_pattern, clean_without_platinum, flags=re.DOTALL)
+    gold_retail = None
+    if gold_match:
+        gold_retail = float(gold_match.group(1))  # 第一個 = 零售牌價
 
-    print("Caltex index:", caltex_index)
+    print(f"黃金零售牌價: {gold_retail}")
+    print(f"白金零售牌價: {platinum_retail}")
 
-    if caltex_index != -1:
-        nearby = clean[caltex_index:caltex_index + 2000]
-        print("===== CALTEX NEARBY TEXT START =====")
-        print(nearby)
-        print("===== CALTEX NEARBY TEXT END =====")
-
-        nearby_prices = re.findall(r"\b\d{2}\.\d{2}\b", nearby)
-        nearby_prices = [float(p) for p in nearby_prices if 15 <= float(p) <= 40]
-
-        unique = []
-        for p in nearby_prices:
-            if p not in unique:
-                unique.append(p)
-
-        print("Nearby prices:", unique)
-
-        if len(unique) >= 2:
-            sorted_prices = sorted(unique)
-            return sorted_prices[0], sorted_prices[-1]
-
-    all_prices = re.findall(r"\b\d{2}\.\d{2}\b", clean)
-    all_prices = [float(p) for p in all_prices if 15 <= float(p) <= 40]
-
-    unique = []
-    for p in all_prices:
-        if p not in unique:
-            unique.append(p)
-
-    print("All prices:", unique)
-
-    if len(unique) >= 2:
-        sorted_prices = sorted(unique)
-        return sorted_prices[0], sorted_prices[-1]
-
-    return None, None
+    return gold_retail, platinum_retail
 
 
 def build_payload(gold_price, platinum_price):
@@ -128,6 +109,10 @@ def main():
 
         if gold_price is None or platinum_price is None:
             raise ValueError("未能從頁面抽取加德士黃金 / 白金油價")
+
+        # 價格合理性校驗：避免提取到異常數據
+        if not (30 < gold_price < 36 and 32 < platinum_price < 38):
+            raise ValueError(f"提取價格異常：黃金 {gold_price} / 白金 {platinum_price}")
 
         old_gold = get_existing_price(existing, "gold")
         old_platinum = get_existing_price(existing, "platinum")
