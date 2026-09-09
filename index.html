@@ -1155,29 +1155,45 @@
 
     function parseConsumerCouncilOilPrices(wrapper) {
       const payload = wrapper && wrapper.data ? wrapper.data : wrapper;
-      const entries = flattenJson(payload);
 
-      const goldBest = pickBestPrice(entries, "gold");
-      const platinumBest = pickBestPrice(entries, "platinum");
+      // 直接按已知結構讀取，唔再靠關鍵字評分（否則最外層節點同時含黃金/白金會互相抵銷、兩邊都揀中第一個數）
+      const readPrice = (node) => {
+        if (node == null) return null;
+        if (typeof node === "number" && Number.isFinite(node)) return node;
+        if (typeof node === "object") return parsePriceCandidate(node.price);
+        return parsePriceCandidate(node);
+      };
 
-      if (!goldBest && !platinumBest) {
+      let gold = readPrice(payload ? payload.gold : null);
+      let platinum = readPrice(payload ? payload.platinum : null);
+
+      // 後備：萬一 JSON 結構改咗，先至用返通用評分解析
+      if (gold == null || platinum == null) {
+        const entries = flattenJson(payload);
+        if (gold == null) {
+          const g = pickBestPrice(entries, "gold");
+          if (g) gold = g.price;
+        }
+        if (platinum == null) {
+          const p = pickBestPrice(entries, "platinum");
+          if (p) platinum = p.price;
+        }
+      }
+
+      if (gold == null && platinum == null) {
         throw new Error("已讀取 data/oilprice.json，但搵唔到加德士黃金 / 白金油價");
       }
 
       const readTime = extractUpdatedAt(payload, wrapper);
 
       return {
-        gold: goldBest ? goldBest.price : null,
-        platinum: platinumBest ? platinumBest.price : null,
+        gold: gold,
+        platinum: platinum,
         updatedAt: readTime,
         loadedAt: readTime,
         source: wrapper && wrapper.source
           ? wrapper.source
-          : "香港消費者委員會油價資訊通",
-        debug: {
-          gold: goldBest,
-          platinum: platinumBest
-        }
+          : "香港消費者委員會油價資訊通"
       };
     }
 
