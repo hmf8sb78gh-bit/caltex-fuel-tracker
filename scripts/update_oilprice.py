@@ -40,30 +40,35 @@ def get_existing_price(existing, fuel_key):
 def extract_caltex_prices(text):
     clean = re.sub(r"\s+", " ", text)
 
-    # ========== 1. 提取白金（特級無鉛汽油）零售牌價 ==========
-    # 頁面結構：特級無鉛汽油 → 加德士 → 第一個價 = 零售牌價，第二個價 = 折後價
+    # ========== 1. 白金（特級無鉛汽油） ==========
+    # 頁面順序：加德士 → 折後價 → 零售牌價
     platinum_pattern = r"特級無鉛汽油.*?加德士.*?(\d{2}\.\d{2}).*?(\d{2}\.\d{2})"
     platinum_match = re.search(platinum_pattern, clean, flags=re.DOTALL)
     platinum_retail = None
+    platinum_discount = None
     if platinum_match:
-        platinum_retail = float(platinum_match.group(1))  # 第一個 = 零售牌價
+        platinum_discount = float(platinum_match.group(1))  # 第1個 = 折後價
+        platinum_retail = float(platinum_match.group(2))    # 第2個 = 零售牌價
 
-    # ========== 2. 提取黃金（普通無鉛汽油）零售牌價 ==========
-    # 先刪走「特級無鉛汽油」整段，避免關鍵詞混淆匹配錯
-    clean_without_platinum = re.sub(
+    # ========== 2. 黃金（普通無鉛汽油） ==========
+    # 先移除特級無鉛段落，避免關鍵詞混淆
+    clean_gold = re.sub(
         r"特級無鉛汽油.*?(?=無鉛汽油|$)",
         "",
         clean,
         flags=re.DOTALL
     )
     gold_pattern = r"無鉛汽油.*?加德士.*?(\d{2}\.\d{2}).*?(\d{2}\.\d{2})"
-    gold_match = re.search(gold_pattern, clean_without_platinum, flags=re.DOTALL)
+    gold_match = re.search(gold_pattern, clean_gold, flags=re.DOTALL)
     gold_retail = None
+    gold_discount = None
     if gold_match:
-        gold_retail = float(gold_match.group(1))  # 第一個 = 零售牌價
+        gold_discount = float(gold_match.group(1))  # 第1個 = 折後價
+        gold_retail = float(gold_match.group(2))    # 第2個 = 零售牌價
 
-    print(f"黃金零售牌價: {gold_retail}")
-    print(f"白金零售牌價: {platinum_retail}")
+    # 除錯輸出
+    print(f"黃金 - 折後價: {gold_discount} | 零售牌價: {gold_retail}")
+    print(f"白金 - 折後價: {platinum_discount} | 零售牌價: {platinum_retail}")
 
     return gold_retail, platinum_retail
 
@@ -110,8 +115,8 @@ def main():
         if gold_price is None or platinum_price is None:
             raise ValueError("未能從頁面抽取加德士黃金 / 白金油價")
 
-        # 價格合理性校驗：避免提取到異常數據
-        if not (30 < gold_price < 36 and 32 < platinum_price < 38):
+        # 價格合理性校驗：零售價一定在 30~38 區間
+        if not (30 < gold_price < 38 and 32 < platinum_price < 40):
             raise ValueError(f"提取價格異常：黃金 {gold_price} / 白金 {platinum_price}")
 
         old_gold = get_existing_price(existing, "gold")
