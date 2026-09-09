@@ -2,9 +2,8 @@ name: Update Oil Price
 
 on:
   schedule:
-    # 每 5 分鐘檢查一次
-    # GitHub Actions cron 使用 UTC 時間
-    - cron: "*/5 * * * *"
+  # 每小時 UTC 正點執行一次 = 香港時間每小時正點
+  - cron: "0 * * * *"
 
   # 可以手動按 Run workflow
   workflow_dispatch:
