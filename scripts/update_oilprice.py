@@ -7,7 +7,7 @@ import requests
 
 
 OUTPUT_PATH = "data/oilprice.json"
-SOURCE_URL = "https://oil-price.consumer.org.hk/tc/retail-price"
+SOURCE_URL = "https://oil-price.consumer.org.hk/tc"
 
 
 def now_hkt():
