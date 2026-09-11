@@ -1,0 +1,4393 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>加德士油價折扣計數機</title>
+
+  <!-- ===== PWA：加到主畫面後變全螢幕 App ===== -->
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="theme-color" content="#070b18" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <meta name="apple-mobile-web-app-title" content="入油計數" />
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
+  <style>
+    :root {
+      --bg: #070b18;
+      --card: #111827;
+      --border: #38455f;
+      --text: #eef4ff;
+      --muted: #a8b3c7;
+      --muted2: #7e8aa3;
+      --red: #ef4444;
+      --orange: #f97316;
+      --green: #22c55e;
+      --input: #182235;
+      --shadow: rgba(0, 0, 0, 0.35);
+      --fs: clamp(0.96rem, 3.6vw, 1.12rem); /* 統一內容字級（同牌價） */
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      background: var(--bg);
+      scroll-behavior: smooth;
+      font-size: 13px;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang HK",
+        "Noto Sans HK", "Microsoft JhengHei", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(239, 68, 68, 0.14), transparent 34rem),
+        radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.13), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    }
+
+    .wrap {
+      width: min(980px, 100%);
+      margin: 0 auto;
+      padding: 14px 12px 26px;
+    }
+
+    header {
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: clamp(1.12rem, 4.7vw, 1.55rem);
+      line-height: 1.1;
+      margin: 0;
+      letter-spacing: -0.02em;
+      white-space: nowrap; /* 標題縮細到一行顯示晒 */
+      min-width: 0;
+    }
+
+    .theme-btn {
+      border: 2px solid var(--border);
+      background: #101827;
+      color: var(--text);
+      border-radius: 24px;
+      min-width: 68px;
+      height: 78px;
+      font-size: 1.8rem;
+      box-shadow: 0 14px 30px var(--shadow);
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 26px 0;
+    }
+
+    .card {
+      background: rgba(17, 24, 39, 0.92);
+      border: 2px solid var(--border);
+      border-radius: 22px;
+      padding: clamp(13px, 3.4vw, 22px);
+      margin-bottom: 16px;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+    }
+
+    h2 {
+      margin: 0 0 13px;
+      font-size: var(--fs);
+      font-weight: 800;
+      letter-spacing: -0.01em;
+    }
+
+    .segmented {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      background: #070c18;
+      border: 2px solid #263149;
+      border-radius: 18px;
+      padding: 6px;
+      margin-bottom: 12px;
+      gap: 7px;
+    }
+
+    .segmented button {
+      border: 0;
+      border-radius: 14px;
+      padding: 11px 8px;
+      background: transparent;
+      color: var(--muted);
+      font-size: var(--fs);
+      font-weight: 800;
+    }
+
+    .segmented button.active {
+      background: linear-gradient(135deg, #ef4444, #f87171);
+      color: white;
+      box-shadow: 0 12px 28px rgba(239, 68, 68, 0.25);
+    }
+
+    .fuel-summary {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      margin: 14px 0 20px;
+    }
+
+    .fuel-pill {
+      border: 1px solid #31405c;
+      background: rgba(7, 12, 24, 0.55);
+      border-radius: 14px;
+      padding: 9px 12px;
+    }
+
+    .fuel-pill .k {
+      color: var(--muted);
+      font-size: var(--fs);
+      margin-bottom: 6px;
+    }
+
+    .fuel-pill .v {
+      color: var(--text);
+      font-weight: 900;
+      font-size: var(--fs);
+      word-break: break-word;
+    }
+
+    /* 實際油價卡搬落結果區，獨佔一行 */
+    .actual-result {
+      margin-bottom: 13px;
+    }
+
+    /* 實際油價醒目卡（跟參考版面：右上角減幅徽章 + 刪除線牌價 + 大價） */
+    .actual-card {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      border-color: rgba(255, 255, 255, 0.28);
+      background: linear-gradient(135deg, #ef4444, #f97316);
+    }
+
+    .actual-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .actual-card .k {
+      color: rgba(255, 255, 255, 0.94);
+      font-weight: 800;
+      margin-bottom: 0;
+    }
+
+    .save-badge {
+      background: #ffffff;
+      color: #e23712;
+      font-weight: 900;
+      border-radius: 999px;
+      padding: 5px 13px;
+      font-size: var(--fs);
+      white-space: nowrap;
+    }
+
+    .actual-list {
+      color: rgba(255, 255, 255, 0.88);
+      font-size: var(--fs);
+    }
+
+    .actual-list s {
+      opacity: 0.85;
+    }
+
+    .actual-price {
+      color: #ffffff;
+      font-weight: 900;
+      font-size: var(--fs);
+      line-height: 1.2;
+    }
+
+    .actual-price .per {
+      font-size: 0.5em;
+      font-weight: 800;
+      margin-left: 5px;
+    }
+
+    .notice {
+      border: 2px solid rgba(239, 68, 68, 0.65);
+      background: rgba(127, 29, 29, 0.22);
+      color: #fecaca;
+      border-radius: 20px;
+      padding: 15px;
+      font-size: clamp(0.95rem, 3.4vw, 1.15rem);
+      line-height: 1.5;
+      margin: 16px 0 0;
+      display: none;
+      white-space: pre-wrap;
+    }
+
+    .notice.show {
+      display: block;
+    }
+
+    .price-box {
+      border: 2px solid #33415d;
+      background: rgba(7, 12, 24, 0.42);
+      border-radius: 20px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+
+    .price-box-title {
+      font-size: clamp(1rem, 3.5vw, 1.15rem);
+      font-weight: 800;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .price-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    @media (min-width: 760px) {
+      .price-row {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      margin-bottom: 11px;
+    }
+
+    @media (min-width: 760px) {
+      .row.two {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    label {
+      display: block;
+      color: #dce8fa;
+      font-size: var(--fs);
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    input,
+    select {
+      width: 100%;
+      border: 2px solid #4b5871;
+      background: var(--input);
+      color: var(--text);
+      border-radius: 16px;
+      padding: 11px 14px;
+      font-size: var(--fs);
+      outline: none;
+      min-height: 48px;
+    }
+
+    /* 唯讀自動讀取欄：外觀同一般輸入框一樣，但唔可以點選／唔出紅邊 */
+    .readonly-field {
+      cursor: default;
+      caret-color: transparent;
+      -webkit-user-select: none;
+      user-select: none;
+      /* 唯讀：淡化邊框，一望就知唔改得（底色／字色維持同其他框一致） */
+      border-color: #2c3650;
+      color: var(--muted);
+    }
+
+    .readonly-field:focus {
+      border-color: #4b5871;
+      box-shadow: none;
+    }
+
+    /* 輸入框右邊內嵌單位（升／公里） */
+    .input-unit {
+      position: relative;
+    }
+
+    .input-unit input {
+      padding-right: 52px;
+    }
+
+    .unit-suffix {
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-size: 0.92rem;
+      font-weight: 700;
+      pointer-events: none;
+    }
+
+    /* 今次入滿剔號 */
+    .full-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 9px;
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: #dce8fa;
+      cursor: pointer;
+    }
+
+    .full-check input {
+      width: 18px;
+      height: 18px;
+      min-height: 0;
+      padding: 0;
+      accent-color: #22c55e;
+      flex: none;
+    }
+
+    .interval-line {
+      margin-top: 7px;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      color: var(--muted);
+      min-height: 1px;
+    }
+
+    .interval-line.warn {
+      color: #fbbf24;
+    }
+
+    .interval-line.ok {
+      color: #86efac;
+    }
+
+    .input-warn:empty {
+      display: none;
+    }
+
+    .input-warn {
+      margin-top: 4px;
+      font-size: 0.86rem;
+      line-height: 1.45;
+      color: #fca5a5;
+      font-weight: 700;
+    }
+
+    select {
+      appearance: auto;
+      -webkit-appearance: menulist;
+    }
+
+    input:focus,
+    select:focus {
+      border-color: var(--red);
+      box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15);
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    @media (min-width: 520px) {
+      .buttons {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    button {
+      cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      transition:
+        transform 0.08s ease,
+        filter 0.08s ease,
+        box-shadow 0.08s ease,
+        opacity 0.08s ease;
+    }
+
+    button:active {
+      transform: scale(0.96);
+      filter: brightness(1.15);
+    }
+
+    .btn.flash,
+    .segmented button.flash,
+    .theme-btn.flash {
+      animation: btnFlash 0.35s ease;
+    }
+
+    @keyframes btnFlash {
+      0% {
+        filter: brightness(1);
+      }
+      45% {
+        filter: brightness(1.35);
+      }
+      100% {
+        filter: brightness(1);
+      }
+    }
+
+    .btn {
+      border: 0;
+      border-radius: 18px;
+      padding: 12px 14px;
+      font-size: var(--fs);
+      font-weight: 900;
+      color: white;
+      background: #46566e;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+      min-height: 50px;
+    }
+
+    .btn:disabled {
+      opacity: 0.65;
+      cursor: default;
+      filter: saturate(0.7);
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, #ef4444, #f97316);
+    }
+
+    .btn.blue {
+      background: linear-gradient(135deg, #2563eb, #60a5fa);
+    }
+
+    .btn.green {
+      background: linear-gradient(135deg, #16a34a, #22c55e);
+    }
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    @media (min-width: 760px) {
+      .result-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .result {
+      position: relative;
+      background: rgba(7, 12, 24, 0.62);
+      border: 1px solid #2f3b55;
+      border-radius: 16px;
+      padding: 12px;
+    }
+
+    .result .k {
+      color: var(--muted);
+      font-size: var(--fs);
+      margin-bottom: 7px;
+    }
+
+    .result.has-prev .k {
+      padding-right: 44%;
+    }
+
+    .result .v {
+      font-size: var(--fs);
+      font-weight: 900;
+      color: white;
+      word-break: break-word;
+    }
+
+    /* 油耗卡右上角：上次每公里油費細行 */
+    .prev-badge {
+      position: absolute;
+      top: 13px;
+      right: 14px;
+      max-width: 52%;
+      text-align: right;
+      font-size: 0.78rem;
+      font-weight: 700;
+      line-height: 1.35;
+      color: var(--muted2);
+    }
+
+    .result.highlight {
+      border-color: rgba(250, 204, 21, 0.65);
+      background: rgba(113, 63, 18, 0.28);
+    }
+
+    .result.main {
+      border-color: rgba(34, 197, 94, 0.65);
+      background: rgba(20, 83, 45, 0.25);
+    }
+
+    .result-save {
+      width: 100%;
+      margin-top: 16px;
+    }
+
+    .small {
+      font-size: 0.88rem;
+      color: var(--muted2);
+      line-height: 1.5;
+      margin-top: 13px;
+    }
+
+    .voucher-hint {
+      font-size: 0.86rem;
+      line-height: 1.5;
+      margin-top: 8px;
+      color: var(--muted2);
+    }
+
+    .voucher-hint.warn {
+      color: #fca5a5;
+    }
+
+    body.light .voucher-hint.warn {
+      color: #b91c1c;
+    }
+
+    .footer {
+      color: var(--muted2);
+      font-size: 0.84rem;
+      text-align: center;
+      margin-top: 24px;
+      line-height: 1.6;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    /* ===== 帳號 / 雲端記憶 ===== */
+    .head-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      align-items: flex-end;
+      flex: none;
+    }
+
+    .acct-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 2px solid var(--border);
+      background: #101827;
+      color: var(--text);
+      border-radius: 999px;
+      height: 50px;
+      padding: 0 16px;
+      font-size: 0.92rem;
+      font-weight: 800;
+      max-width: 190px;
+      flex: none;
+      box-shadow: 0 14px 30px var(--shadow);
+    }
+
+    .acct-btn svg {
+      width: 19px;
+      height: 19px;
+      flex: none;
+    }
+
+    .acct-btn #acctLabel {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .acct-btn.is-in {
+      border-color: rgba(34, 197, 94, 0.55);
+    }
+
+    body.light .acct-btn {
+      background: #ffffff;
+    }
+
+    /* 彈出畫面 */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      background: rgba(3, 7, 18, 0.72);
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 14px;
+    }
+
+    @media (min-width: 680px) {
+      .modal-overlay {
+        align-items: center;
+      }
+    }
+
+    .modal-panel {
+      width: min(560px, 100%);
+      max-height: 88vh;
+      overflow-y: auto;
+      margin: 0;
+      border-radius: 24px;
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .modal-head h2 {
+      margin: 0;
+      font-size: clamp(1.25rem, 4.8vw, 1.6rem);
+    }
+
+    .modal-close {
+      flex: none;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      font-size: 1.05rem;
+    }
+
+    .auth-card h2 {
+      margin-bottom: 14px;
+    }
+
+    .auth-fields {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    @media (min-width: 760px) {
+      .auth-fields {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .auth-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .auth-msg {
+      font-size: 0.92rem;
+      line-height: 1.5;
+      margin-top: 12px;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+
+    .auth-msg.error {
+      color: #fca5a5;
+    }
+
+    .auth-msg.ok {
+      color: #86efac;
+    }
+
+    body.light .auth-msg.error {
+      color: #b91c1c;
+    }
+
+    body.light .auth-msg.ok {
+      color: #15803d;
+    }
+
+    .account-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .account-email {
+      font-weight: 900;
+      font-size: var(--fs);
+      word-break: break-all;
+    }
+
+    .account-actions {
+      display: inline-flex;
+      gap: 8px;
+      flex: none;
+    }
+
+    /* 紅框「清除記錄」掣 */
+    .wipe-btn {
+      color: #fca5a5;
+      background: transparent;
+      border: 1.5px solid #ef4444;
+      box-shadow: none;
+    }
+
+    .wipe-btn:active {
+      background: rgba(239, 68, 68, 0.18);
+    }
+
+    .wipe-text {
+      color: var(--text);
+      font-size: var(--fs);
+      line-height: 1.6;
+      margin: 0 0 12px;
+    }
+
+    .wipe-text.warn-text {
+      color: #fca5a5;
+    }
+
+    .wipe-text.strong {
+      font-weight: 800;
+      color: #f87171;
+    }
+
+    .wipe-confirm {
+      background: linear-gradient(135deg, #dc2626, #ef4444);
+    }
+
+    /* AI 月度分析 */
+    .ai-loading {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      color: var(--muted);
+      font-size: var(--fs);
+      line-height: 1.6;
+      padding: 4px 0;
+    }
+
+    .ai-spinner {
+      width: 18px;
+      height: 18px;
+      flex: none;
+      border-radius: 50%;
+      border: 2px solid #38455f;
+      border-top-color: #f97316;
+      animation: aiSpin 0.8s linear infinite;
+    }
+
+    @keyframes aiSpin {
+      to { transform: rotate(360deg); }
+    }
+
+    .ai-body {
+      white-space: pre-wrap;
+      line-height: 1.7;
+      font-size: var(--fs);
+      color: var(--text);
+    }
+
+    .ai-body.error {
+      color: #fca5a5;
+    }
+
+    #aiRetryBtn {
+      grid-column: 1 / -1;
+    }
+
+    .cloud-meta {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    @media (min-width: 680px) {
+      .cloud-meta {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .cloud-cell-full {
+        grid-column: 1 / -1;
+      }
+    }
+
+    .cloud-cell {
+      border: 1px solid #31405c;
+      background: rgba(7, 12, 24, 0.55);
+      border-radius: 16px;
+      padding: 11px 13px;
+    }
+
+    .cloud-cell .k {
+      color: var(--muted);
+      font-size: var(--fs);
+      margin-bottom: 5px;
+    }
+
+    .cloud-cell .v {
+      font-weight: 900;
+      font-size: var(--fs);
+    }
+
+    .cloud-k-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .cloud-prev {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--muted2);
+      white-space: nowrap;
+    }
+
+    body.light .cloud-cell {
+      background: rgba(241, 245, 249, 0.88);
+    }
+
+    .sync-line {
+      margin-top: 12px;
+      font-size: 0.86rem;
+      color: var(--muted2);
+      line-height: 1.5;
+    }
+
+    .btn.small-btn {
+      min-height: 48px;
+      padding: 10px 18px;
+      font-size: 1rem;
+      border-radius: 16px;
+    }
+
+    code {
+      color: inherit;
+    }
+
+    body.light {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --border: #cbd5e1;
+      --text: #0f172a;
+      --muted: #475569;
+      --muted2: #64748b;
+      --input: #ffffff;
+      background:
+        radial-gradient(circle at top left, rgba(239, 68, 68, 0.13), transparent 34rem),
+        radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.12), transparent 30rem),
+        var(--bg);
+    }
+
+    body.light .card {
+      background: rgba(255, 255, 255, 0.94);
+    }
+
+    body.light .segmented {
+      background: #e7edf6;
+    }
+
+    body.light .fuel-pill,
+    body.light .price-box,
+    body.light .result {
+      background: rgba(241, 245, 249, 0.88);
+    }
+
+    body.light .actual-card {
+      background: linear-gradient(135deg, #ef4444, #f97316);
+    }
+
+    body.light .result.main {
+      background: rgba(220, 252, 231, 0.95);
+    }
+
+    body.light .result.highlight {
+      background: rgba(254, 249, 195, 0.95);
+    }
+
+    body.light .result .v {
+      color: #0f172a;
+    }
+
+    body.light .theme-btn {
+      background: #ffffff;
+    }
+
+    body.light label {
+      color: #1e293b;
+    }
+
+    /* ===== 消耗品 / 入油記錄入口 / 第二頁 ===== */
+    .entry-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .consum-entry {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      border: 1.5px solid var(--border);
+      background: rgba(17, 24, 39, 0.92);
+      color: var(--text);
+      border-radius: 14px;
+      padding: 9px 12px;
+      font-size: 0.86rem;
+      font-weight: 700;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+      text-align: left;
+      min-height: 0;
+    }
+
+    .consum-entry .ce-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .consum-entry .ce-arrow {
+      font-size: 1.25em;
+      font-weight: 900;
+      color: var(--muted);
+      flex: none;
+    }
+
+    .consum-entry .ce-left {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    /* 入口前單一圓點：顏色＝全部消耗品入面最深（最 urgent）嗰級，提示有嘢要換 */
+    .consum-entry .ce-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #86efac; /* 預設淺綠（全部正常） */
+      flex: none;
+      display: none; /* 未登入預設收埋，登入後由 JS 顯示 */
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.06);
+    }
+
+    #consumPage {
+      display: none;
+    }
+
+    body.consum-mode #consumPage {
+      display: block;
+    }
+
+    #fillupsPage {
+      display: none;
+    }
+
+    body.fillups-mode #fillupsPage {
+      display: block;
+    }
+
+    #repairsPage {
+      display: none;
+    }
+
+    body.repairs-mode #repairsPage {
+      display: block;
+    }
+
+    body.consum-mode > .wrap > header,
+    body.consum-mode .divider,
+    body.consum-mode .entry-row,
+    body.consum-mode #inputCard,
+    body.consum-mode #resultSection,
+    body.consum-mode .footer,
+    body.fillups-mode > .wrap > header,
+    body.fillups-mode .divider,
+    body.fillups-mode .entry-row,
+    body.fillups-mode #inputCard,
+    body.fillups-mode #resultSection,
+    body.fillups-mode #consumPage,
+    body.fillups-mode #repairsPage,
+    body.fillups-mode .footer,
+    body.repairs-mode > .wrap > header,
+    body.repairs-mode .divider,
+    body.repairs-mode .entry-row,
+    body.repairs-mode #inputCard,
+    body.repairs-mode #resultSection,
+    body.repairs-mode #consumPage,
+    body.repairs-mode #fillupsPage,
+    body.repairs-mode .footer {
+      display: none;
+    }
+
+    /* 入油記錄清單 */
+    .fu-picker {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .row .fu-picker {
+      margin-bottom: 0;
+    }
+
+    .fu-picker select {
+      width: 100%;
+      border: 2px solid #4b5871;
+      background: var(--input);
+      color: var(--text);
+      border-radius: 14px;
+      padding: 11px 12px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      min-height: 48px;
+    }
+
+    .fu-group + .fu-group {
+      margin-top: 18px;
+    }
+
+    .fu-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 8px 4px 10px;
+      border-bottom: 1px solid #31405c;
+      margin-bottom: 6px;
+    }
+
+    .fu-head .fu-month {
+      font-weight: 900;
+      font-size: 1.02rem;
+    }
+
+    .fu-head .fu-total {
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 700;
+    }
+
+    .fu-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 4px;
+      border-bottom: 1px solid rgba(49, 64, 92, 0.5);
+    }
+
+    .fu-left {
+      min-width: 0;
+    }
+
+    .fu-date {
+      font-weight: 800;
+      font-size: 0.96rem;
+    }
+
+    .fu-sub {
+      color: var(--muted2);
+      font-size: 0.8rem;
+      margin-top: 2px;
+    }
+
+    .fu-amt {
+      flex: none;
+      font-weight: 900;
+      font-size: 1.02rem;
+    }
+
+    .fu-empty {
+      color: var(--muted2);
+      font-size: 0.9rem;
+      padding: 12px 4px;
+    }
+
+    /* 維修記錄清單 */
+    .rp-group + .rp-group {
+      margin-top: 16px;
+    }
+
+    .rp-month {
+      font-weight: 900;
+      font-size: 1rem;
+      padding: 6px 4px 8px;
+      border-bottom: 1px solid #31405c;
+      margin-bottom: 4px;
+    }
+
+    .rp-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 4px;
+      border-bottom: 1px solid rgba(49, 64, 92, 0.5);
+    }
+
+    .rp-item {
+      font-weight: 800;
+      font-size: 0.98rem;
+      min-width: 0;
+    }
+
+    .rp-km {
+      flex: none;
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 700;
+    }
+
+    .rp-empty {
+      color: var(--muted2);
+      font-size: 0.9rem;
+      padding: 12px 4px;
+    }
+
+    .page-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .back-btn {
+      flex: none;
+      border: 2px solid var(--border);
+      background: #101827;
+      color: var(--text);
+      border-radius: 16px;
+      min-height: 52px;
+      padding: 0 18px;
+      font-size: var(--fs);
+      font-weight: 800;
+    }
+
+    .page-title {
+      font-size: var(--fs);
+      font-weight: 900;
+      margin: 0;
+      flex: 1;
+    }
+
+    .consum-auth-btn {
+      flex: none;
+      border: 2px solid var(--border);
+      background: #101827;
+      color: var(--text);
+      border-radius: 16px;
+      min-height: 52px;
+      padding: 0 16px;
+      font-size: 0.95rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .consum-current-line {
+      font-size: var(--fs);
+      font-weight: 800;
+      color: var(--text);
+      padding-bottom: 12px;
+      margin-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .consum-row {
+      display: grid;
+      grid-template-columns: 40% 1fr;
+      align-items: start;
+      gap: 12px;
+      padding: 13px 2px;
+      border-bottom: 1px solid rgba(56, 69, 95, 0.55);
+    }
+
+    .consum-row:last-child {
+      border-bottom: 0;
+    }
+
+    .consum-row .cleft {
+      padding-top: 11px;
+    }
+
+    .consum-row .cname {
+      font-size: var(--fs);
+      font-weight: 800;
+    }
+
+    .consum-row .clast {
+      color: var(--muted);
+      font-size: 0.84rem;
+      margin-top: 6px;
+    }
+
+    .consum-row .cright {
+      min-width: 0;
+    }
+
+    .consum-row input {
+      width: 100%;
+      min-height: 48px;
+      padding: 10px 14px;
+    }
+
+    .consum-row input[type="date"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      min-width: 0;
+      color: var(--text);
+      font-family: inherit;
+    }
+
+    .consum-row .cinput-label {
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-bottom: 5px;
+      font-weight: 600;
+    }
+
+    .consum-row .cdist {
+      color: #86efac;
+      font-size: 0.84rem;
+      margin-top: 4px;
+      min-height: 1em;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    /* 迷你「?」變色規則掣 */
+    .rule-q {
+      flex: none;
+      width: 17px;
+      height: 17px;
+      border-radius: 50%;
+      border: 1.5px solid var(--muted2);
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 800;
+      line-height: 1;
+      padding: 0;
+      min-height: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: none;
+    }
+
+    /* 變色規則懸浮視窗 */
+    .rule-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(3, 6, 15, 0.66);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 22px;
+      z-index: 90;
+    }
+
+    .rule-overlay.show {
+      display: flex;
+    }
+
+    .rule-card {
+      width: min(420px, 100%);
+      background: #111827;
+      border: 2px solid var(--border);
+      border-radius: 22px;
+      padding: 22px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+    }
+
+    .rule-card h3 {
+      margin: 0 0 14px;
+      font-size: 1.12rem;
+    }
+
+    .rule-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.95rem;
+      padding: 6px 0;
+      color: var(--text);
+    }
+
+    .rule-dot {
+      flex: none;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+    }
+
+    .rule-close {
+      margin-top: 16px;
+      width: 100%;
+      border: 0;
+      border-radius: 16px;
+      min-height: 50px;
+      background: linear-gradient(135deg, #ef4444, #f97316);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 900;
+    }
+
+    .consum-save {
+      width: 100%;
+      margin-top: 18px;
+    }
+
+    .consum-tip {
+      color: var(--muted2);
+      font-size: 0.86rem;
+      line-height: 1.55;
+      margin: 12px 2px 0;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+</head>
+
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>加德士油價折扣計數機</h1>
+      </div>
+      <div class="head-actions">
+        <button class="acct-btn" type="button" id="authOpenBtn">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="8" r="4" fill="currentColor"></circle>
+            <path d="M4 20c0-3.6 3.6-6 8-6s8 2.4 8 6" fill="currentColor"></path>
+          </svg>
+          <span id="acctLabel">登入 / 註冊</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 兩個半闊入口：消耗品記錄 ＋ 入油記錄 -->
+    <div class="entry-row">
+      <button class="consum-entry" id="openConsumBtn" type="button">
+        <span class="ce-left">
+          <span class="ce-dot" id="ceDot" aria-hidden="true"></span>
+          <span class="ce-label">消耗品記錄</span>
+        </span>
+        <span class="ce-arrow">›</span>
+      </button>
+      <button class="consum-entry" id="openFillupsBtn" type="button">
+        <span class="ce-left">
+          <span class="ce-label">入油記錄</span>
+        </span>
+        <span class="ce-arrow">›</span>
+      </button>
+      <button class="consum-entry" id="openRepairsBtn" type="button">
+        <span class="ce-left">
+          <span class="ce-label">維修記錄</span>
+        </span>
+        <span class="ce-arrow">›</span>
+      </button>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 帳號彈出畫面：撳右上角「登入 / 註冊」先出現 -->
+    <div class="modal-overlay hidden" id="authModal">
+      <div class="modal-panel card auth-card">
+        <div class="modal-head">
+          <h2>帳號</h2>
+          <button type="button" class="modal-close" id="authCloseBtn" aria-label="關閉">✕</button>
+        </div>
+
+        <!-- 未登入 -->
+        <div id="authLoggedOut">
+          <div class="auth-fields">
+            <div>
+              <label for="authEmail">電郵 Email</label>
+              <input id="authEmail" type="email" inputmode="email" autocomplete="email" placeholder="例如 you@example.com" />
+            </div>
+            <div>
+              <label for="authPassword">密碼</label>
+              <input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 6 位" />
+            </div>
+          </div>
+          <div class="auth-buttons">
+            <button type="button" class="btn primary" id="loginBtn">登入</button>
+            <button type="button" class="btn blue" id="registerBtn">註冊新帳號</button>
+          </div>
+          <div class="auth-msg" id="authMsg">註冊後每次入油撳「儲存今次里數作下次起點」，上次總公里數同每公里油費就會跟返你個帳號，換手機登入都見到。未登入都可以照用，只係記錄淨係留喺呢部機。</div>
+        </div>
+
+        <!-- 已登入 -->
+        <div id="authLoggedIn" class="hidden">
+          <div class="account-bar">
+            <span class="account-email" id="accountEmail">--</span>
+            <span class="account-actions">
+              <button type="button" class="btn small-btn wipe-btn" id="wipeBtn">清除記錄</button>
+              <button type="button" class="btn small-btn" id="logoutBtn">登出</button>
+            </span>
+          </div>
+
+          <div class="cloud-meta">
+            <div class="cloud-cell">
+              <div class="k">上次入油總公里數</div>
+              <div class="v" id="cloudLastOdometer">--</div>
+            </div>
+            <div class="cloud-cell">
+              <div class="k">上次每公里油費</div>
+              <div class="v" id="cloudLastConsumption">--</div>
+            </div>
+            <div class="cloud-cell cloud-cell-full">
+              <div class="k cloud-k-row">
+                <span id="cloudMonthLabel">本月累計實付</span>
+                <span class="cloud-prev" id="cloudPrevTotal"></span>
+              </div>
+              <div class="v" id="cloudMonthTotal">--</div>
+            </div>
+            <div class="cloud-cell cloud-cell-full">
+              <div class="k cloud-k-row">
+                <span id="cloudMonthKmLabel">本月累積里程</span>
+                <span class="cloud-prev" id="cloudPrevKm"></span>
+              </div>
+              <div class="v" id="cloudMonthKm">--</div>
+            </div>
+          </div>
+
+          <div class="sync-line" id="syncLine">已登入，準備就緒。</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 清除記錄：雙重確認視窗 -->
+    <div class="modal-overlay hidden" id="wipeModal">
+      <div class="modal-panel card wipe-card">
+        <div class="modal-head">
+          <h2>清除所有記錄</h2>
+          <button type="button" class="modal-close" id="wipeCloseBtn" aria-label="關閉">✕</button>
+        </div>
+
+        <!-- 第一重 -->
+        <div id="wipeStep1">
+          <p class="wipe-text">
+            將會永久刪除你帳號喺雲端嘅<strong>全部</strong>資料，包括：上次入油總公里數、上次每公里油費、每月累計實付／里程、所有入油記錄，以及全部消耗品更換記錄。
+          </p>
+          <p class="wipe-text warn-text">刪除後無法還原。</p>
+          <div class="auth-buttons">
+            <button type="button" class="btn" id="wipeCancelBtn">取消</button>
+            <button type="button" class="btn wipe-confirm" id="wipeNextBtn">確定清除</button>
+          </div>
+        </div>
+
+        <!-- 第二重 -->
+        <div id="wipeStep2" class="hidden">
+          <p class="wipe-text warn-text strong">最後確認：真係要清晒所有雲端記錄？此操作無法復原！</p>
+          <div class="auth-buttons">
+            <button type="button" class="btn" id="wipeBackBtn">返去</button>
+            <button type="button" class="btn wipe-confirm" id="wipeFinalBtn">我確定，永久清除</button>
+          </div>
+          <div class="auth-msg" id="wipeMsg"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI 月度分析視窗 -->
+    <div class="modal-overlay hidden" id="aiModal">
+      <div class="modal-panel card">
+        <div class="modal-head">
+          <h2 id="aiTitle">月度分析</h2>
+          <button type="button" class="modal-close" id="aiCloseBtn" aria-label="關閉">✕</button>
+        </div>
+        <div class="ai-loading" id="aiLoading">
+          <span class="ai-spinner"></span>
+          <span>AI 分析中，通常 5 至 10 秒，請稍候…</span>
+        </div>
+        <div class="ai-body" id="aiBody"></div>
+        <div class="auth-buttons">
+          <button type="button" class="btn hidden" id="aiRetryBtn">重新生成</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 燃油選擇 + 折扣/入油資料：合併成同一個框 -->
+    <section class="card" id="inputCard">
+      <h2>選擇燃油種類</h2>
+
+      <div class="segmented">
+        <button type="button" id="goldBtn" class="active">黃金（平油）</button>
+        <button type="button" id="platinumBtn">白金（貴油）</button>
+      </div>
+
+      <div class="fuel-summary">
+        <div class="fuel-pill">
+          <div class="k">牌價</div>
+          <div class="v" id="topPumpPrice">--</div>
+        </div>
+      </div>
+
+      <div id="loadStatus" class="notice"></div>
+
+      <div id="manualBox" class="price-box hidden">
+        <div class="price-box-title">未能自動讀取油價，可手動輸入</div>
+
+        <div class="price-row">
+          <div>
+            <label for="manualGoldPrice">黃金油價，每升 HK$</label>
+            <input id="manualGoldPrice" type="number" inputmode="decimal" step="0.01" placeholder="例如 32.67" />
+          </div>
+          <div>
+            <label for="manualPlatinumPrice">白金油價，每升 HK$</label>
+            <input id="manualPlatinumPrice" type="number" inputmode="decimal" step="0.01" placeholder="例如 34.47" />
+          </div>
+        </div>
+
+        <div class="buttons">
+          <button type="button" class="btn primary" id="applyManualBtn">套用手動油價</button>
+        </div>
+      </div>
+
+      <div class="row two">
+        <div>
+          <label for="discountCard">折扣卡</label>
+          <select id="discountCard">
+            <option value="11,12">私人能源卡：黃金減$11 / 白金減$12</option>
+            <option value="10,11">一般折扣：黃金減$10 / 白金減$11</option>
+            <option value="9,10">一般折扣：黃金減$9 / 白金減$10</option>
+            <option value="0,0">沒有折扣卡</option>
+            <option value="custom">自訂折扣</option>
+          </select>
+        </div>
+
+        <div id="customDiscountBox" class="hidden">
+          <label for="customDiscount">自訂每升油卡折扣 HK$</label>
+          <input id="customDiscount" type="number" inputmode="decimal" step="0.01" value="0" />
+        </div>
+      </div>
+
+      <div class="row two">
+        <div>
+          <label for="voucher">油券</label>
+          <select id="voucher">
+            <option value="50">每滿$350減$50（可疊加）</option>
+            <option value="0">沒有油券</option>
+            <option value="custom">自訂油券面額（每滿$350一張）</option>
+          </select>
+          <div class="voucher-hint" id="voucherHint"></div>
+        </div>
+
+        <div id="customVoucherBox" class="hidden">
+          <label for="customVoucher">自訂油券金額 HK$</label>
+          <input id="customVoucher" type="number" inputmode="decimal" step="0.01" value="0" />
+        </div>
+      </div>
+
+      <div class="row two">
+        <div>
+          <label for="litres">今次入油量</label>
+          <div class="input-unit">
+            <input id="litres" type="number" inputmode="decimal" step="0.01" value="0" />
+            <span class="unit-suffix">升</span>
+          </div>
+          <label class="full-check"><input type="checkbox" id="fullTankChk" /> 今次入滿（跳槍）</label>
+          <div class="interval-line" id="intervalLine"></div>
+        </div>
+
+        <div>
+          <label for="lastOdometer">上次入油總里數（自動讀取）</label>
+          <div class="input-unit">
+            <input id="lastOdometer" class="readonly-field" type="number" inputmode="decimal" step="0.1" placeholder="登入後自動帶入" readonly tabindex="-1" />
+            <span class="unit-suffix">公里</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="currentOdometer">今次入油總里數</label>
+          <div class="input-unit">
+            <input id="currentOdometer" type="number" inputmode="decimal" step="0.1" placeholder="例如 110820" />
+            <span class="unit-suffix">公里</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="input-warn" id="inputWarn"></div>
+
+      <div class="buttons">
+        <button type="button" class="btn primary" id="calcBtn">計算</button>
+      </div>
+    </section>
+
+    <!-- 計算結果：撳「計算」先彈出 -->
+    <section class="card hidden" id="resultSection">
+      <h2>計算結果</h2>
+
+      <div class="fuel-pill actual-card actual-result">
+        <div class="actual-top">
+          <span class="k">實際油價</span>
+          <span class="save-badge" id="topSavePerLitre">減 $--</span>
+        </div>
+        <div class="actual-list" id="topListPrice">牌價：--</div>
+        <div class="actual-price"><span id="topRealPerLitre">--</span><span class="per">/升</span></div>
+      </div>
+
+      <div class="result-grid">
+        <div class="result highlight has-prev">
+          <div class="k">實付金額</div>
+          <div class="v" id="resultPay">--</div>
+          <span class="prev-badge" id="monthTotalLine"></span>
+        </div>
+
+        <div class="result main has-prev">
+          <div class="k">每公里油費</div>
+          <div class="v" id="resultCostPerKm">--</div>
+          <span class="prev-badge" id="resultPrevCost"></span>
+        </div>
+
+        <div class="result has-prev">
+          <div class="k">今次行駛距離</div>
+          <div class="v" id="resultDistanceKm">--</div>
+          <span class="prev-badge" id="monthKmLine"></span>
+        </div>
+
+        <div class="result">
+          <div class="k">油耗</div>
+          <div class="v" id="resultFuelConsumption">--</div>
+        </div>
+      </div>
+
+      <button type="button" class="btn green result-save" id="saveOdometerBtn">儲存</button>
+
+      <button type="button" class="btn blue result-save" id="aiAnalysisBtn">AI 月度分析</button>
+
+      <p class="small" id="updatedAtText">尚未載入油價。</p>
+    </section>
+
+    <!-- ===== 第二頁：消耗品更換記錄 ===== -->
+    <section id="consumPage">
+      <div class="page-head">
+        <button class="back-btn" id="closeConsumBtn" type="button">‹ 返回</button>
+        <h2 class="page-title">消耗品更換記錄</h2>
+        <button class="consum-auth-btn" id="consumAuthBtn" type="button">登入 / 註冊</button>
+      </div>
+
+      <div class="card">
+        <div class="consum-current-line" id="consumCurrentLine">現時總里程：--</div>
+
+        <div id="consumList"></div>
+
+        <button type="button" class="btn primary consum-save" id="consumSaveBtn">儲存消耗品記錄</button>
+
+        <p class="consum-tip" id="consumSyncLine">填好各項更換里程後撳「儲存」；登入帳號會一併同步到雲端。</p>
+      </div>
+    </section>
+
+    <!-- ===== 第二頁：入油記錄（今個月＋上個月） ===== -->
+    <section id="fillupsPage">
+      <div class="page-head">
+        <button class="back-btn" id="closeFillupsBtn" type="button">‹ 返回</button>
+        <h2 class="page-title">入油記錄</h2>
+        <span class="consum-auth-btn" style="visibility:hidden">佔位</span>
+      </div>
+
+      <div class="card">
+        <div class="fu-picker">
+          <select id="fuYearSel" aria-label="選擇年份"></select>
+          <select id="fuMonthSel" aria-label="選擇月份"></select>
+        </div>
+        <div id="fillupsList"></div>
+        <p class="consum-tip">用上面揀年份同月份（12 個月都睇到）；金額同里程由你撳「儲存」時自動記低。</p>
+      </div>
+    </section>
+
+    <!-- ===== 第二頁：維修記錄（手動輸入＋清單） ===== -->
+    <section id="repairsPage">
+      <div class="page-head">
+        <button class="back-btn" id="closeRepairsBtn" type="button">‹ 返回</button>
+        <h2 class="page-title">維修記錄</h2>
+        <span class="consum-auth-btn" style="visibility:hidden">佔位</span>
+      </div>
+
+      <div class="card">
+        <div class="row two">
+          <div>
+            <label for="repairItem">換咗咩 / 維修項目</label>
+            <input id="repairItem" type="text" placeholder="例如：換四條輪呔" />
+          </div>
+          <div>
+            <label for="repairMileage">換時總里程，公里</label>
+            <input id="repairMileage" type="number" inputmode="decimal" step="0.1" placeholder="例如 110820" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>日期（年份／月份）</label>
+            <div class="fu-picker">
+              <select id="repairYearSel" aria-label="維修年份"></select>
+              <select id="repairMonthSel" aria-label="維修月份"></select>
+            </div>
+          </div>
+        </div>
+        <button type="button" class="btn primary" id="repairAddBtn">新增維修記錄</button>
+        <p class="consum-tip" id="repairSyncLine">填好撳「新增」；登入帳號會同步到雲端，換機都見到。</p>
+      </div>
+
+      <div class="card">
+        <div id="repairList"></div>
+      </div>
+    </section>
+
+    <!-- 變色規則懸浮視窗 -->
+    <div class="rule-overlay" id="ruleOverlay">
+      <div class="rule-card">
+        <h3 id="ruleTitle">變色規則</h3>
+        <div id="ruleBody"></div>
+        <button type="button" class="rule-close" id="ruleCloseBtn">知道咗</button>
+      </div>
+    </div>
+
+    <div class="footer" id="footerInfo">
+      油價資料來源：香港消費者委員會油價資訊通。<br />
+      最後檢查時間：尚未載入。
+    </div>
+  </div>
+
+  <script>
+    const OIL_PRICE_API_URL = "./data/oilprice.json";
+    const STORAGE_KEY = "caltexCalcStateV8";
+    const VOUCHER_STEP = 350; // 每滿 HK$350 牌價總額疊一張油券（張數 = floor(牌價總額 / 350)）
+
+    // ===== Supabase 帳號 / 雲端記憶 =====
+    const SUPABASE_URL = "https://wdzpxyupjrxduqxkyupm.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_Ss5_kVTVICLCtocDhxsdmA_zKbqltwD";
+    const CLOUD_TABLE = "fuel_records";
+    const CONSUM_TABLE = "consumable_records";
+    const FILLUP_TABLE = "fuel_fillups";
+    const FILLUP_KEY = "fuelFillupsV1";
+    const REPAIR_TABLE = "repair_records";
+    const REPAIR_KEY = "repairRecordsV1";
+
+    // publishable/anon key 只可公開擺前端，真正隔離靠資料庫 RLS（每個帳號只掂到自己嗰行）
+    const sb = window.supabase
+      ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+          auth: { persistSession: true, autoRefreshToken: true }
+        })
+      : null;
+
+    const DEFAULT_PRICES = {
+      gold: null,
+      platinum: null,
+      updatedAt: "",
+      loadedAt: "",
+      source: "消委會油價資訊通"
+    };
+
+    let appState = {
+      fuelType: "gold",
+      prices: { ...DEFAULT_PRICES },
+      user: null,           // 目前登入用戶
+      cloudRecord: null,    // 由雲端讀返嘅記錄 {last_odometer,last_consumption,...}
+      authReady: false,     // Supabase 登入狀態是否已確認（未確認前唔好彈走 #consumables）
+      // 滿缸法區間：兩次「入滿」之間累積；startOdo＝上次入滿時嘅總里程
+      fullInterval: { open: false, startOdo: null, litres: 0, paid: 0 },
+      lastInterval: null    // 上一次結算結果 {dist,litres,paid,costPerKm,kmPerL,date}
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    const els = {
+      goldBtn: $("goldBtn"),
+      platinumBtn: $("platinumBtn"),
+
+      topPumpPrice: $("topPumpPrice"),
+      topSavePerLitre: $("topSavePerLitre"),
+      topListPrice: $("topListPrice"),
+      topRealPerLitre: $("topRealPerLitre"),
+
+      manualBox: $("manualBox"),
+      manualGoldPrice: $("manualGoldPrice"),
+      manualPlatinumPrice: $("manualPlatinumPrice"),
+      applyManualBtn: $("applyManualBtn"),
+      loadStatus: $("loadStatus"),
+
+      discountCard: $("discountCard"),
+      customDiscountBox: $("customDiscountBox"),
+      customDiscount: $("customDiscount"),
+      voucher: $("voucher"),
+      customVoucherBox: $("customVoucherBox"),
+      customVoucher: $("customVoucher"),
+      voucherHint: $("voucherHint"),
+
+      litres: $("litres"),
+      fullTankChk: $("fullTankChk"),
+      intervalLine: $("intervalLine"),
+      inputWarn: $("inputWarn"),
+      lastOdometer: $("lastOdometer"),
+      currentOdometer: $("currentOdometer"),
+
+      calcBtn: $("calcBtn"),
+      saveOdometerBtn: $("saveOdometerBtn"),
+
+      authOpenBtn: $("authOpenBtn"),
+      acctLabel: $("acctLabel"),
+      authModal: $("authModal"),
+      authCloseBtn: $("authCloseBtn"),
+      authLoggedOut: $("authLoggedOut"),
+      authLoggedIn: $("authLoggedIn"),
+      authEmail: $("authEmail"),
+      authPassword: $("authPassword"),
+      loginBtn: $("loginBtn"),
+      registerBtn: $("registerBtn"),
+      logoutBtn: $("logoutBtn"),
+      wipeBtn: $("wipeBtn"),
+      wipeModal: $("wipeModal"),
+      wipeCloseBtn: $("wipeCloseBtn"),
+      wipeCancelBtn: $("wipeCancelBtn"),
+      wipeNextBtn: $("wipeNextBtn"),
+      wipeBackBtn: $("wipeBackBtn"),
+      wipeFinalBtn: $("wipeFinalBtn"),
+      wipeStep1: $("wipeStep1"),
+      wipeStep2: $("wipeStep2"),
+      wipeMsg: $("wipeMsg"),
+      aiAnalysisBtn: $("aiAnalysisBtn"),
+      aiModal: $("aiModal"),
+      aiTitle: $("aiTitle"),
+      aiCloseBtn: $("aiCloseBtn"),
+      aiLoading: $("aiLoading"),
+      aiBody: $("aiBody"),
+      aiRetryBtn: $("aiRetryBtn"),
+      authMsg: $("authMsg"),
+      accountEmail: $("accountEmail"),
+      cloudLastOdometer: $("cloudLastOdometer"),
+      cloudLastConsumption: $("cloudLastConsumption"),
+      syncLine: $("syncLine"),
+
+      resultSection: $("resultSection"),
+      resultPay: $("resultPay"),
+      monthTotalLine: $("monthTotalLine"),
+      resultCostPerKm: $("resultCostPerKm"),
+      resultDistanceKm: $("resultDistanceKm"),
+      resultFuelConsumption: $("resultFuelConsumption"),
+      resultPrevCost: $("resultPrevCost"),
+      updatedAtText: $("updatedAtText"),
+      footerInfo: $("footerInfo")
+    };
+
+    // 數字顯示：先保留 digits 位小數，尾零（如 .00／.0）全部唔顯示
+    function neat(n, digits = 2) {
+      if (!Number.isFinite(n)) return "--";
+      return String(Number(Number(n).toFixed(digits)));
+    }
+
+    function money(n) {
+      if (!Number.isFinite(n)) return "--";
+      return "HK$" + neat(n, 2);
+    }
+
+    function numberValue(el, fallback = 0) {
+      const n = Number(el.value);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function nowText() {
+      return new Date().toLocaleString("zh-HK", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+    }
+
+    function showStatus(message) {
+      els.loadStatus.textContent = message;
+      els.loadStatus.className = "notice show";
+    }
+
+    function hideStatus() {
+      els.loadStatus.textContent = "";
+      els.loadStatus.className = "notice";
+    }
+
+    function flashButton(button) {
+      if (!button) return;
+      button.classList.remove("flash");
+      void button.offsetWidth;
+      button.classList.add("flash");
+      setTimeout(() => {
+        button.classList.remove("flash");
+      }, 380);
+    }
+
+    function updateFooterTime() {
+      const time =
+        appState.prices.loadedAt ||
+        appState.prices.updatedAt ||
+        "尚未載入";
+
+      els.footerInfo.innerHTML =
+        "油價資料來源：香港消費者委員會油價資訊通。<br />" +
+        "最後檢查時間：" +
+        time +
+        "。";
+    }
+
+    function saveState() {
+      const data = {
+        version: 8,
+        fuelType: appState.fuelType,
+        prices: appState.prices,
+        fullInterval: appState.fullInterval,
+        lastInterval: appState.lastInterval,
+
+        manualGoldPrice: els.manualGoldPrice.value,
+        manualPlatinumPrice: els.manualPlatinumPrice.value,
+
+        discountCard: els.discountCard.value,
+        customDiscount: els.customDiscount.value,
+
+        voucher: els.voucher.value,
+        customVoucher: els.customVoucher.value,
+
+        litres: els.litres.value,
+        lastOdometer: els.lastOdometer.value,
+        currentOdometer: els.currentOdometer.value
+      };
+
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      } catch (e) {}
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+
+        if (!raw) return;
+
+        const data = JSON.parse(raw);
+
+        if (data.fuelType) appState.fuelType = data.fuelType;
+
+        if (data.fullInterval) {
+          appState.fullInterval = Object.assign(
+            { open: false, startOdo: null, litres: 0, paid: 0 },
+            data.fullInterval
+          );
+        }
+        if (data.lastInterval) appState.lastInterval = data.lastInterval;
+
+        if (data.prices) {
+          appState.prices = {
+            ...DEFAULT_PRICES,
+            ...data.prices
+          };
+        }
+
+        if (data.manualGoldPrice != null) {
+          els.manualGoldPrice.value = data.manualGoldPrice;
+        }
+
+        if (data.manualPlatinumPrice != null) {
+          els.manualPlatinumPrice.value = data.manualPlatinumPrice;
+        }
+
+        if (data.discountCard != null) els.discountCard.value = data.discountCard;
+        if (data.customDiscount != null) els.customDiscount.value = data.customDiscount;
+
+        if (data.voucher != null) els.voucher.value = data.voucher;
+        if (data.customVoucher != null) els.customVoucher.value = data.customVoucher;
+
+        if (data.litres != null) els.litres.value = data.litres;
+        if (data.lastOdometer != null && data.lastOdometer !== "") {
+          const nLast = Number(data.lastOdometer);
+          els.lastOdometer.value = Number.isFinite(nLast) ? neat(nLast, 1) : data.lastOdometer;
+        }
+        if (data.currentOdometer != null) els.currentOdometer.value = data.currentOdometer;
+      } catch (e) {}
+    }
+
+    function setFuelType(type) {
+      appState.fuelType = type;
+      els.goldBtn.classList.toggle("active", type === "gold");
+      els.platinumBtn.classList.toggle("active", type === "platinum");
+      calculate(false);
+      saveState();
+    }
+
+    function getCurrentPumpPrice() {
+      return appState.fuelType === "gold"
+        ? Number(appState.prices.gold)
+        : Number(appState.prices.platinum);
+    }
+
+    function getDiscountPerLitre() {
+      if (els.discountCard.value === "custom") {
+        return numberValue(els.customDiscount, 0);
+      }
+
+      const parts = els.discountCard.value.split(",").map(Number);
+      const goldDiscount = parts[0] || 0;
+      const platinumDiscount = parts[1] || 0;
+
+      return appState.fuelType === "gold" ? goldDiscount : platinumDiscount;
+    }
+
+    function getVoucherAmount() {
+      if (els.voucher.value === "custom") {
+        return numberValue(els.customVoucher, 0);
+      }
+      return Number(els.voucher.value) || 0;
+    }
+
+    function getDistanceKm() {
+      const last = numberValue(els.lastOdometer, NaN);
+      const current = numberValue(els.currentOdometer, NaN);
+
+      if (!Number.isFinite(last) || !Number.isFinite(current)) return NaN;
+
+      const distance = current - last;
+      if (!Number.isFinite(distance) || distance <= 0) return NaN;
+
+      return distance;
+    }
+
+    function updateCustomFieldsVisibility() {
+      els.customDiscountBox.classList.toggle("hidden", els.discountCard.value !== "custom");
+      els.customVoucherBox.classList.toggle("hidden", els.voucher.value !== "custom");
+    }
+
+    // 輸入防呆：檢查升數、里程係咪合理，傳返警告字（空字串＝冇問題）
+    function validateInputs() {
+      const litres = els.litres.value.trim() === "" ? NaN : Number(els.litres.value);
+      const last = els.lastOdometer.value.trim() === "" ? NaN : Number(els.lastOdometer.value);
+      const current = els.currentOdometer.value.trim() === "" ? NaN : Number(els.currentOdometer.value);
+      const msgs = [];
+
+      if (Number.isFinite(litres) && litres < 0) msgs.push("入油量唔可以係負數。");
+      if (Number.isFinite(current) && current < 0) msgs.push("總里程唔可以係負數。");
+      if (Number.isFinite(last) && Number.isFinite(current) && current < last) {
+        msgs.push("今次總里程(" + neat(current, 1) + ")細過上次(" + neat(last, 1) + ")，請檢查。");
+      }
+      if (Number.isFinite(current) && current > 9999999) msgs.push("總里程數值異常偏大，請檢查。");
+
+      const text = msgs.join(" ");
+      if (els.inputWarn) els.inputWarn.textContent = text;
+      return text;
+    }
+
+    function calculateEffectiveValues() {
+      const pumpPrice = getCurrentPumpPrice();
+      const cardDiscount = getDiscountPerLitre(); // 折扣卡基本折扣 HK$/升
+      const litres = numberValue(els.litres, 0);
+      const voucherPerSheet = getVoucherAmount(); // 單張油券面額
+
+      const empty = {
+        pumpPrice,
+        cardDiscount,
+        litres,
+        voucherPerSheet,
+        voucherSheets: 0,
+        voucher: 0,
+        listTotal: NaN,
+        billedAmount: NaN,
+        billedLitres: NaN,
+        cardDiscountTotal: NaN,
+        cardNetPerLitre: NaN,
+        payable: NaN,
+        realPerLitre: NaN
+      };
+
+      if (!Number.isFinite(pumpPrice) || pumpPrice <= 0) {
+        return empty;
+      }
+
+      const safeLitres = Math.max(0, litres);
+
+      // ① 牌價總額 gross = 牌價 × 實際入油量
+      const listTotal = pumpPrice * safeLitres;
+
+      // ② 油券：每滿 HK$350 一張、可疊加，張數 = floor(gross / 350)
+      const voucherSheets =
+        voucherPerSheet > 0 && listTotal > 0
+          ? Math.floor(listTotal / VOUCHER_STEP)
+          : 0;
+      const voucher = voucherSheets * voucherPerSheet;
+
+      // ③ 計入帳單金額 = gross − 油券；計入帳單入油量 = 計入帳單金額 / 牌價
+      const billedAmount = Math.max(0, listTotal - voucher);
+      const billedLitres = billedAmount / pumpPrice;
+
+      // ④ 卡折 = 基本折扣/升 × 計入帳單入油量（油券墊住嘅部份唔再享卡折扣）
+      const cardNetPerLitre = Math.max(0, pumpPrice - cardDiscount);
+      const cardDiscountTotal = cardDiscount * billedLitres;
+
+      // ⑤ 應付金額 = 計入帳單金額 − 卡折
+      const payable = Math.max(0, billedAmount - cardDiscountTotal);
+
+      // ⑥ 最終油價（實際每升）= 應付金額 / 實際入油量
+      const realPerLitre =
+        safeLitres > 0 ? payable / safeLitres : cardNetPerLitre;
+
+      return {
+        pumpPrice,
+        cardDiscount,
+        litres,
+        voucherPerSheet,
+        voucherSheets,
+        voucher,
+        listTotal,
+        billedAmount,
+        billedLitres,
+        cardDiscountTotal,
+        cardNetPerLitre,
+        payable,
+        realPerLitre
+      };
+    }
+
+    function updateVoucherHint(values) {
+      const hint = els.voucherHint;
+      if (!hint) return;
+
+      if (!Number.isFinite(values.listTotal) || !(values.voucherPerSheet > 0)) {
+        hint.textContent = "";
+        hint.className = "voucher-hint";
+        return;
+      }
+
+      if (values.voucherSheets > 0) {
+        const remainder = VOUCHER_STEP - (values.listTotal % VOUCHER_STEP);
+        let text =
+          "牌價總額 HK$" + neat(values.listTotal, 2) +
+          "，每滿 HK$350 一張，共用 " + values.voucherSheets +
+          " 張、共減 HK$" + neat(values.voucher, 2) + "。";
+        if (remainder > 0.01) {
+          text += " 再入約 HK$" + neat(remainder, 2) + " 牌價可多疊一張。";
+        }
+        hint.textContent = text;
+        hint.className = "voucher-hint";
+      } else {
+        const diff = VOUCHER_STEP - values.listTotal;
+        hint.textContent =
+          "牌價總額 HK$" + neat(values.listTotal, 2) +
+          "，未滿 HK$350（差 HK$" + neat(diff, 2) + "），暫未用券。";
+        hint.className = "voucher-hint warn";
+      }
+    }
+
+    function updateTopFuelSummary(values) {
+      els.topPumpPrice.textContent = money(values.pumpPrice);
+
+      if (Number.isFinite(values.realPerLitre) && Number.isFinite(values.pumpPrice)) {
+        const savePerLitre = values.pumpPrice - values.realPerLitre;
+        els.topSavePerLitre.textContent = "減 $" + neat(savePerLitre, 2);
+        els.topListPrice.innerHTML = "牌價：<s>" + money(values.pumpPrice) + "</s>";
+        els.topRealPerLitre.textContent = money(values.realPerLitre);
+      } else {
+        els.topSavePerLitre.textContent = "減 $--";
+        els.topListPrice.textContent = "牌價：--";
+        els.topRealPerLitre.textContent = "--";
+      }
+    }
+
+    function updatePrevCostBadge() {
+      // 滿缸法：優先顯示上一次結算區間嘅每公里油費
+      const li = appState.lastInterval;
+      if (li && Number.isFinite(li.costPerKm)) {
+        els.resultPrevCost.textContent = "上次 HK$" + neat(li.costPerKm, 2) + "/km";
+        return;
+      }
+      const r = appState.cloudRecord;
+      const v = r && r.last_consumption != null ? Number(r.last_consumption) : NaN;
+      els.resultPrevCost.textContent = Number.isFinite(v)
+        ? "上次 HK$" + neat(v, 2) + "/km"
+        : "";
+    }
+
+    // 滿缸法（B：預設自動累計，唔使入滿；剔「今次入滿」只係對齊重計）
+    function getIntervalView(values) {
+      const chk = !!(els.fullTankChk && els.fullTankChk.checked);
+      const acc = appState.fullInterval;
+      const curOdo = numberValue(els.currentOdometer, NaN);
+      const curLitres = Number.isFinite(values.litres) ? values.litres : 0;
+      const curPaid = Number.isFinite(values.payable) ? values.payable : 0;
+      const li = appState.lastInterval;
+
+      let cost = NaN;
+      let kmL = NaN;
+      let status = "";
+      let cls = "";
+
+      const hasBase = acc.open && acc.startOdo != null &&
+        Number.isFinite(curOdo) && curOdo > acc.startOdo;
+      const totalL = acc.litres + curLitres;
+      const totalP = acc.paid + curPaid;
+      const totalD = hasBase ? curOdo - acc.startOdo : 0;
+
+      if (chk && hasBase) {
+        // 剔入滿：結算呢段並對齊重計
+        if (totalL > 0) {
+          kmL = totalD / totalL;
+          cost = totalP / totalD;
+        }
+        status = "今次入滿（跳槍）會結算並重新起計：累計 " + neat(totalL, 2) + " 升、HK$" +
+          neat(totalP, 2) + "、" + neat(totalD, 1) + " km";
+        cls = "ok";
+      } else if (chk && !acc.open) {
+        status = "今次入滿會做為起點，之後入油自動累計，唔使再入滿。";
+        cls = "warn";
+      } else if (!chk && hasBase) {
+        // 普通入油：即時累計平均
+        if (totalL > 0 && totalD > 0) {
+          kmL = totalD / totalL;
+          cost = totalP / totalD;
+        }
+        status = "累計中：" + neat(totalL, 2) + " 升、HK$" + neat(totalP, 2) + "、" +
+          neat(totalD, 1) + " km（入滿跳槍可剔號重新起計）";
+        cls = "ok";
+      } else if (!chk && acc.open) {
+        status = "累計中，輸入今次總里程就出到平均油耗。";
+        cls = "warn";
+      } else {
+        status = "第一次儲存後自動開始累計，唔使入滿；入滿跳槍可剔號重新起計。";
+        cls = "warn";
+      }
+
+      // 未出到數就顯示返上一次結算值（如有）
+      if (!Number.isFinite(cost) && li) {
+        cost = li.costPerKm;
+        kmL = li.kmPerL;
+      }
+
+      if (els.intervalLine) {
+        els.intervalLine.textContent = status;
+        els.intervalLine.className = "interval-line " + cls;
+      }
+      return { cost, kmL };
+    }
+
+    function calculate(shouldScroll = false) {
+      updateCustomFieldsVisibility();
+      validateInputs();
+
+      const values = calculateEffectiveValues();
+      const distanceKm = getDistanceKm();
+      const intervalView = getIntervalView(values);
+
+      updateTopFuelSummary(values);
+      updateVoucherHint(values);
+      updatePrevCostBadge();
+      updateMonthTotalLine();
+      updateEntryDot();
+
+      if (!Number.isFinite(values.pumpPrice) || values.pumpPrice <= 0) {
+        els.resultPay.textContent = "--";
+        els.resultCostPerKm.textContent = "--";
+        els.resultDistanceKm.textContent = Number.isFinite(distanceKm)
+          ? neat(distanceKm, 1) + " km"
+          : "--";
+        els.resultFuelConsumption.textContent = "--";
+        els.updatedAtText.textContent = "尚未載入有效油價。";
+        updateFooterTime();
+        saveState();
+
+        if (shouldScroll) scrollToResults();
+        return;
+      }
+
+      // 每公里油費／油耗用滿缸法區間（兩次入滿之間），唔再用單次
+      const costPerKm = intervalView.cost;
+      const kmPerLitre = intervalView.kmL;
+
+      // 有有效油價就自動展開結果區（唔使再撳計算先出）
+      els.resultSection.classList.remove("hidden");
+
+      els.resultPay.textContent = money(values.payable);
+      els.resultCostPerKm.textContent = Number.isFinite(costPerKm)
+        ? money(costPerKm) + " / km"
+        : "--";
+      els.resultDistanceKm.textContent = Number.isFinite(distanceKm)
+        ? neat(distanceKm, 1) + " km"
+        : "--";
+      els.resultFuelConsumption.textContent = Number.isFinite(kmPerLitre)
+        ? neat(kmPerLitre, 2) + " km / L"
+        : "--";
+
+      const time =
+        appState.prices.loadedAt ||
+        appState.prices.updatedAt ||
+        "油價已載入";
+
+      els.updatedAtText.textContent =
+        "最後檢查時間：" +
+        time +
+        "｜資料來源：" +
+        (appState.prices.source || "消委會油價資訊通");
+
+      updateFooterTime();
+      saveState();
+
+      if (shouldScroll) scrollToResults();
+    }
+
+    function scrollToResults() {
+      setTimeout(() => {
+        els.resultSection.scrollIntoView({
+          behavior: "smooth",
+          block: "start"
+        });
+      }, 80);
+    }
+
+    async function fetchOilPriceData() {
+      const url = OIL_PRICE_API_URL + "?t=" + Date.now();
+
+      const response = await fetch(url, {
+        method: "GET",
+        cache: "no-store"
+      });
+
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status + "，可能 data/oilprice.json 尚未建立");
+      }
+
+      return await response.json();
+    }
+
+    // 後端固定輸出 {data:{gold:{price},platinum:{price}}}，直接讀固定欄位
+    function readPriceNum(node) {
+      if (node == null) return null;
+      if (typeof node === "number" && Number.isFinite(node)) return node;
+      if (typeof node === "object" && node.price != null) return Number(node.price);
+      const n = Number(node);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function parseConsumerCouncilOilPrices(wrapper) {
+      const payload = wrapper && wrapper.data ? wrapper.data : wrapper;
+      const gold = readPriceNum(payload ? payload.gold : null);
+      const platinum = readPriceNum(payload ? payload.platinum : null);
+
+      if (gold == null && platinum == null) {
+        throw new Error("已讀取 data/oilprice.json，但搵唔到加德士黃金 / 白金油價");
+      }
+
+      // 合理區間校驗（10–60），同埋白金應貴過黃金
+      const inRange = (v) => v == null || (v >= 10 && v <= 60);
+      if (!inRange(gold) || !inRange(platinum)) {
+        throw new Error("油價數值超出合理範圍");
+      }
+      if (gold != null && platinum != null && platinum <= gold) {
+        throw new Error("白金油價應貴過黃金，數據可能有誤");
+      }
+
+      const readTime =
+        (wrapper && wrapper.fetched_at_hkt) ||
+        (wrapper && wrapper.updated_at) ||
+        (payload && payload.updated_at) ||
+        nowText();
+
+      return {
+        gold,
+        platinum,
+        updatedAt: readTime,
+        loadedAt: readTime,
+        source: wrapper && wrapper.source ? wrapper.source : "香港消費者委員會油價資訊通"
+      };
+    }
+
+    let lastOilFetchAt = 0;
+    async function reloadOilPrices() {
+      hideStatus();
+
+      try {
+        const data = await fetchOilPriceData();
+        const prices = parseConsumerCouncilOilPrices(data);
+        lastOilFetchAt = Date.now();
+
+        appState.prices = {
+          ...appState.prices,
+          gold: prices.gold != null ? prices.gold : appState.prices.gold,
+          platinum: prices.platinum != null ? prices.platinum : appState.prices.platinum,
+          updatedAt: prices.updatedAt,
+          loadedAt: prices.loadedAt,
+          source: prices.source
+        };
+
+        if (appState.prices.gold != null) {
+          els.manualGoldPrice.value = Number(appState.prices.gold).toFixed(2);
+        }
+
+        if (appState.prices.platinum != null) {
+          els.manualPlatinumPrice.value = Number(appState.prices.platinum).toFixed(2);
+        }
+
+        els.manualBox.classList.add("hidden");
+        hideStatus();
+        calculate(false);
+        saveState();
+      } catch (error) {
+        console.error(error);
+
+        showStatus(
+          "未能自動讀取油價，請手動輸入油價。"
+        );
+
+        els.manualBox.classList.remove("hidden");
+        calculate(false);
+      }
+    }
+
+    function applyManualPrices() {
+      const gold = numberValue(els.manualGoldPrice, NaN);
+      const platinum = numberValue(els.manualPlatinumPrice, NaN);
+
+      if (!Number.isFinite(gold) && !Number.isFinite(platinum)) {
+        showStatus("請至少輸入一個有效油價。");
+        return;
+      }
+
+      if (Number.isFinite(gold) && gold > 0) {
+        appState.prices.gold = gold;
+      }
+
+      if (Number.isFinite(platinum) && platinum > 0) {
+        appState.prices.platinum = platinum;
+      }
+
+      const manualTime = nowText();
+
+      appState.prices.updatedAt = manualTime;
+      appState.prices.loadedAt = manualTime;
+      appState.prices.source = "手動輸入";
+
+      hideStatus();
+      calculate(false);
+      saveState();
+    }
+
+    // ===================== 帳號 / 雲端記憶 =====================
+    function setAuthMsg(text, kind) {
+      els.authMsg.textContent = text;
+      els.authMsg.className = "auth-msg" + (kind ? " " + kind : "");
+    }
+
+    function setSyncLine(text) {
+      if (els.syncLine) els.syncLine.textContent = text;
+    }
+
+    function formatCloudTime(iso) {
+      if (!iso) return "未知時間";
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? "未知時間" : d.toLocaleString("zh-HK");
+    }
+
+    function friendlyAuthError(error) {
+      const msg = (error && error.message) || String(error);
+      if (/invalid login credentials/i.test(msg)) return "電郵或密碼唔啱，請再試。";
+      if (/already registered/i.test(msg)) return "呢個電郵已經註冊咗，直接撳「登入」。";
+      if (/email not confirmed/i.test(msg)) return "電郵尚未驗證，請先去信箱點擊確認連結。";
+      if (/at least 6 characters/i.test(msg)) return "密碼至少要 6 位。";
+      if (/too many requests|rate limit|for security purposes|only request this after/i.test(msg)) {
+        const m = msg.match(/after\s+(\d+)\s*seconds/i);
+        return m
+          ? "操作太頻密，請等約 " + Math.ceil(Number(m[1]) / 60) + " 分鐘（" + m[1] + " 秒）先再撳，期間唔好連續撳。"
+          : "操作太頻密，請隔約 1 分鐘先再試。";
+      }
+      if (/network|fetch/i.test(msg)) return "網絡連唔到，請檢查連線後再試。";
+      return msg;
+    }
+
+    function renderAuth() {
+      const u = appState.user;
+      els.authLoggedOut.classList.toggle("hidden", !!u);
+      els.authLoggedIn.classList.toggle("hidden", !u);
+
+      if (u) {
+        els.accountEmail.textContent = u.email || "已登入";
+        els.acctLabel.textContent = "已登入";
+        els.authOpenBtn.classList.add("is-in");
+        els.authOpenBtn.setAttribute("title", u.email || "已登入");
+        const cab = document.getElementById("consumAuthBtn");
+        if (cab) cab.textContent = "登出";
+      } else {
+        els.acctLabel.textContent = "登入 / 註冊";
+        els.authOpenBtn.classList.remove("is-in");
+        els.authOpenBtn.setAttribute("title", "登入 / 註冊新帳號");
+        const cab = document.getElementById("consumAuthBtn");
+        if (cab) cab.textContent = "登入 / 註冊";
+      }
+
+      renderCloudRecord();
+      updateEntryDot();
+    }
+
+    function openAuthModal() {
+      renderAuth();
+      els.authModal.classList.remove("hidden");
+      setTimeout(() => {
+        if (appState.user) return;
+        els.authEmail.focus({ preventScroll: true });
+      }, 60);
+    }
+
+    function closeAuthModal() {
+      els.authModal.classList.add("hidden");
+    }
+
+    function renderCloudRecord() {
+      const r = appState.cloudRecord;
+      els.cloudLastOdometer.textContent =
+        r && r.last_odometer != null
+          ? neat(Number(r.last_odometer), 1) + " km"
+          : "--";
+      const prevCost = r && r.last_consumption != null ? Number(r.last_consumption) : NaN;
+      els.cloudLastConsumption.textContent = Number.isFinite(prevCost)
+        ? "HK$" + neat(prevCost, 2) + " / km"
+        : "--";
+    }
+
+    async function cloudLoadRecord() {
+      if (!sb || !appState.user) return;
+      setSyncLine("正在由雲端讀取你嘅記錄…");
+
+      const { data, error } = await sb
+        .from(CLOUD_TABLE)
+        .select("*")
+        .eq("user_id", appState.user.id)
+        .maybeSingle();
+
+      if (error) {
+        setSyncLine("雲端讀取失敗：" + error.message);
+        return;
+      }
+
+      appState.cloudRecord = data || null;
+      renderCloudRecord();
+
+      if (data) {
+        if (data.last_odometer != null) {
+          els.lastOdometer.value = neat(Number(data.last_odometer), 1);
+        }
+        // 滿缸法累積進度都由雲端還原（換機都接返）
+        if (data.full_interval && typeof data.full_interval === "object") {
+          appState.fullInterval = Object.assign(
+            { open: false, startOdo: null, litres: 0, paid: 0 },
+            data.full_interval
+          );
+        }
+        if (data.last_interval && typeof data.last_interval === "object") {
+          appState.lastInterval = data.last_interval;
+        }
+        // 注意：「今次入油總里程」唔會由雲端填入，保持純本地輸入
+        if (data.fuel_type === "gold" || data.fuel_type === "platinum") {
+          setFuelType(data.fuel_type);
+        }
+        calculate(false);
+        saveState();
+        setSyncLine("已載入你嘅雲端記錄（更新於 " + formatCloudTime(data.updated_at) + "）。");
+      } else {
+        setSyncLine("帳號暫時未有記錄；入油後撳「儲存」就會備份到呢度。");
+      }
+    }
+
+    // lastCostPerKm：上次每公里油費（HK$/km），沿用 DB 欄位 last_consumption 儲存
+    async function cloudSaveRecord(lastOdometer, lastCostPerKm) {
+      if (!sb || !appState.user) return;
+      setSyncLine("正在同步到你嘅帳號…");
+
+      // 現時總里程（雲端版）＝上次入油總里數＋消耗品輸入取最大，排除「今次入油總里程」
+      const curMileage = cloudCurrentMileage();
+      const baseRow = {
+        user_id: appState.user.id,
+        last_odometer: Number(lastOdometer),
+        current_mileage: curMileage != null ? Number(curMileage) : null,
+        last_consumption: lastCostPerKm == null ? null : Number(lastCostPerKm),
+        fuel_type: appState.fuelType,
+        updated_at: new Date().toISOString()
+      };
+      // 滿缸法累積進度（要喺 fuel_records 加 full_interval / last_interval 兩個 jsonb 欄）
+      const row = Object.assign({}, baseRow, {
+        full_interval: appState.fullInterval,
+        last_interval: appState.lastInterval
+      });
+
+      let { error } = await sb
+        .from(CLOUD_TABLE)
+        .upsert(row, { onConflict: "user_id" });
+
+      // 若未跑 SQL 加欄位，降級用基本欄位再試，唔阻住正常儲存
+      if (error && /full_interval|last_interval|column/i.test(error.message)) {
+        const retry = await sb.from(CLOUD_TABLE).upsert(baseRow, { onConflict: "user_id" });
+        error = retry.error;
+      }
+
+      if (error) {
+        setSyncLine("同步失敗：" + error.message);
+        return false;
+      }
+
+      appState.cloudRecord = row;
+      renderCloudRecord();
+      setSyncLine("已同步到你嘅帳號 ✓（" + nowText() + "）");
+      return true;
+    }
+
+    // 入油里程一變就 debounce 上雲（等 800ms 唔好逐個字寫）
+    let odoSyncTimer = null;
+    function cloudSyncOdometerDebounced() {
+      if (!sb || !appState.user) return;
+      clearTimeout(odoSyncTimer);
+      odoSyncTimer = setTimeout(() => {
+        const lastOdo = els.lastOdometer ? Number(els.lastOdometer.value) : NaN;
+        const lastCons = appState.cloudRecord && appState.cloudRecord.last_consumption != null
+          ? appState.cloudRecord.last_consumption : null;
+        cloudSaveRecord(Number.isFinite(lastOdo) ? lastOdo : 0, lastCons);
+      }, 800);
+    }
+
+    async function handleRegister() {
+      if (!sb) {
+        setAuthMsg("帳號系統載入唔到，請檢查網絡後重新整理；其餘功能仍可離線使用。", "error");
+        return;
+      }
+
+      const email = els.authEmail.value.trim();
+      const password = els.authPassword.value;
+
+      if (!email || password.length < 6) {
+        setAuthMsg("請填寫電郵，密碼至少 6 位。", "error");
+        return;
+      }
+
+      setAuthMsg("正在註冊…");
+      const { data, error } = await sb.auth.signUp({ email, password });
+
+      if (error) {
+        setAuthMsg("註冊失敗：" + friendlyAuthError(error), "error");
+        return;
+      }
+
+      if (data && data.session) {
+        setAuthMsg("註冊成功，已經自動登入 ✓", "ok");
+      } else {
+        setAuthMsg("註冊成功，但你開咗電郵驗證，請先去信箱點擊確認連結，再返嚟登入。", "ok");
+      }
+    }
+
+    async function handleLogin() {
+      if (!sb) {
+        setAuthMsg("帳號系統載入唔到，請檢查網絡後重新整理。", "error");
+        return;
+      }
+
+      const email = els.authEmail.value.trim();
+      const password = els.authPassword.value;
+
+      if (!email || !password) {
+        setAuthMsg("請輸入電郵同密碼。", "error");
+        return;
+      }
+
+      setAuthMsg("正在登入…");
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+
+      if (error) {
+        setAuthMsg("登入失敗：" + friendlyAuthError(error), "error");
+      }
+      // 成功會由 onAuthStateChange 接手切換介面
+    }
+
+    // 登出時清除本地個人記錄（消耗品、入油實付、上次里程），但保留油價/主題等設定
+    // 記錄净係留喺雲端，登入先拉返落嚟
+    function clearLocalRecords() {
+      consumState.km = {};
+      saveConsumState();
+      try { localStorage.removeItem(FILLUP_KEY); } catch (e) {}
+      try { localStorage.removeItem(REPAIR_KEY); } catch (e) {}
+      repairsCache = [];
+      fillupMonthTotal = 0;
+      fillupMonthKm = 0;
+      fillupPrevTotal = 0;
+      fillupPrevKm = 0;
+      if (els.lastOdometer) els.lastOdometer.value = "";
+      appState.cloudRecord = null;
+      appState.fullInterval = { open: false, startOdo: null, litres: 0, paid: 0 };
+      appState.lastInterval = null;
+      if (els.fullTankChk) els.fullTankChk.checked = false;
+      renderConsumables();
+      updateMonthTotalLine();
+      calculate(false);
+      saveState();
+    }
+
+    async function handleLogout() {
+      if (!sb) return;
+      const { error } = await sb.auth.signOut();
+      if (error) {
+        setAuthMsg("登出失敗：" + friendlyAuthError(error), "error");
+        return;
+      }
+      appState.user = null;
+      appState.cloudRecord = null;
+      clearLocalRecords();
+      renderAuth();
+      closeAuthModal();
+      // 喺消耗品頁／入油記錄頁／維修頁登出就跳返計油主頁
+      closeConsumPage();
+      closeFillupsPage();
+      closeRepairsPage();
+    }
+
+    // ===== 清除記錄（雙重確認 → 刪晒雲端三張表＋本機） =====
+    function resetWipeModal() {
+      els.wipeStep1.classList.remove("hidden");
+      els.wipeStep2.classList.add("hidden");
+      els.wipeMsg.textContent = "";
+      els.wipeMsg.className = "auth-msg";
+      els.wipeFinalBtn.disabled = false;
+      els.wipeFinalBtn.textContent = "我確定，永久清除";
+    }
+
+    function openWipeModal() {
+      if (!appState.user) return;
+      resetWipeModal();
+      els.wipeModal.classList.remove("hidden");
+    }
+
+    function closeWipeModal() {
+      els.wipeModal.classList.add("hidden");
+    }
+
+    function setWipeMsg(text, kind) {
+      els.wipeMsg.textContent = text || "";
+      els.wipeMsg.className = "auth-msg" + (kind ? " " + kind : "");
+    }
+
+    async function cloudWipeAll() {
+      if (!sb || !appState.user) return;
+      const uid = appState.user.id;
+      // 四張表：fuel_records、consumable_records、fuel_fillups、repair_records
+      const tasks = [
+        sb.from(CLOUD_TABLE).delete().eq("user_id", uid),
+        sb.from(CONSUM_TABLE).delete().eq("user_id", uid),
+        sb.from(FILLUP_TABLE).delete().eq("user_id", uid),
+        sb.from(REPAIR_TABLE).delete().eq("user_id", uid)
+      ];
+      const results = await Promise.all(tasks);
+      const errs = results.map((r) => r.error).filter(Boolean);
+      if (errs.length) {
+        throw new Error(errs.map((e) => e.message).join("；"));
+      }
+    }
+
+    async function confirmWipeFinal() {
+      const btn = els.wipeFinalBtn;
+      btn.disabled = true;
+      btn.textContent = "清除中…";
+      setWipeMsg("");
+      try {
+        await cloudWipeAll();
+        // 雲端清完，本機都一併清走、重設畫面（維持登入狀態）
+        clearLocalRecords();
+        appState.cloudRecord = null;
+        renderCloudRecord();
+        renderAuth();
+        closeWipeModal();
+        setAuthMsg("已清除你帳號嘅所有雲端同本機記錄。", "ok");
+        openAuthModal();
+      } catch (e) {
+        console.error(e);
+        btn.disabled = false;
+        btn.textContent = "我確定，永久清除";
+        setWipeMsg("清除失敗：" + friendlyAuthError(e) + "。請檢查網絡或資料庫權限後重試。", "error");
+      }
+    }
+
+    // ===== AI 月度分析（經 Supabase Edge Function 隱藏 DeepSeek key） =====
+    function openAiModal() {
+      els.aiModal.classList.remove("hidden");
+    }
+
+    function closeAiModal() {
+      els.aiModal.classList.add("hidden");
+    }
+
+    async function runMonthlyAnalysis() {
+      if (!sb) {
+        els.aiTitle.textContent = "月度分析";
+        els.aiLoading.classList.add("hidden");
+        els.aiBody.classList.add("error");
+        els.aiBody.textContent = "帳號系統未載入，請檢查網絡後重試。";
+        els.aiRetryBtn.classList.remove("hidden");
+        openAiModal();
+        return;
+      }
+
+      const { data: sessionData } = await sb.auth.getSession();
+      const session = sessionData && sessionData.session;
+      if (!session) {
+        setAuthMsg("月度分析需要登入，先對返你帳號嘅記錄。", "error");
+        openAuthModal();
+        return;
+      }
+
+      const month = hkYMD().slice(0, 7);
+      els.aiTitle.textContent = Number(month.slice(5, 7)) + "月 月度分析";
+      els.aiBody.textContent = "";
+      els.aiBody.classList.remove("error");
+      els.aiLoading.classList.remove("hidden");
+      els.aiRetryBtn.classList.add("hidden");
+      openAiModal();
+
+      try {
+        const resp = await fetch(SUPABASE_URL + "/functions/v1/monthly-analysis", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + session.access_token
+          },
+          body: JSON.stringify({ month })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || "HTTP " + resp.status);
+
+        els.aiLoading.classList.add("hidden");
+        els.aiBody.textContent = data.analysis || "冇分析內容。";
+        els.aiRetryBtn.classList.remove("hidden");
+      } catch (e) {
+        console.error(e);
+        els.aiLoading.classList.add("hidden");
+        els.aiBody.classList.add("error");
+        els.aiBody.textContent =
+          "分析失敗：" + friendlyAuthError(e) +
+          "。請確認已喺 Supabase 部署 monthly-analysis 函數同設定 DEEPSEEK_API_KEY，之後撳「重新生成」。";
+        els.aiRetryBtn.classList.remove("hidden");
+      }
+    }
+
+    function initAuth() {
+      if (!sb) {
+        setAuthMsg("未能載入帳號系統（網絡問題或 CDN 被封鎖）。可以照常用，只係記錄淨係存喺呢部機。", "error");
+        appState.authReady = true;
+        syncViewFromHash();
+        return;
+      }
+
+      // 訂閱登入狀態：初始化、登入、登出都會觸發
+      sb.auth.onAuthStateChange((event, session) => {
+        if (session && session.user) {
+          appState.user = session.user;
+          els.authPassword.value = "";
+          renderAuth();
+          closeAuthModal();
+          cloudLoadRecord();
+          cloudLoadConsum();
+          cloudLoadMonthTotal();
+        } else {
+          appState.user = null;
+          appState.cloudRecord = null;
+          const ymNow = hkYMD().slice(0, 7);
+          const ymPrev = prevYm(ymNow);
+          fillupMonthTotal = localYmTotal(ymNow);
+          fillupMonthKm = localYmKm(ymNow);
+          fillupPrevTotal = localYmTotal(ymPrev);
+          fillupPrevKm = localYmKm(ymPrev);
+          updateMonthTotalLine();
+          renderAuth();
+        }
+        // 登入狀態確認完，重新判斷消耗品頁（解決 refresh 被彈走）
+        appState.authReady = true;
+        syncViewFromHash();
+      });
+
+      // 主動拎一次現有 session（雙保險，加快 refresh 還原）
+      sb.auth.getSession().then(({ data }) => {
+        if (data && data.session && data.session.user) {
+          appState.user = data.session.user;
+          renderAuth();
+          cloudLoadRecord();
+          cloudLoadConsum();
+          cloudLoadMonthTotal();
+        }
+        appState.authReady = true;
+        syncViewFromHash();
+      });
+    }
+
+    // ===== 入油實付記錄：本月（1–31 號）累計，本機 + 雲端 =====
+    let fillupMonthTotal = 0;   // 本月累計實付（HK$）
+    let fillupMonthKm = 0;      // 本月累積里程（km）
+    let fillupPrevTotal = 0;    // 上月累計實付（HK$）
+    let fillupPrevKm = 0;       // 上月累積里程（km）
+
+    // 傳入 YYYY-MM，傳返下個月 YYYY-MM（12 月進位到下一年）
+    function nextYm(ym) {
+      const y = Number(ym.slice(0, 4));
+      const m = Number(ym.slice(5, 7));
+      if (m >= 12) return (y + 1) + "-01";
+      return ym.slice(0, 5) + String(m + 1).padStart(2, "0");
+    }
+
+    function hkYMD() {
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Hong_Kong",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(new Date()); // en-CA => YYYY-MM-DD
+      } catch (e) {
+        const x = new Date();
+        return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
+      }
+    }
+
+    function loadLocalFillups() {
+      try {
+        return JSON.parse(localStorage.getItem(FILLUP_KEY) || "[]");
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveLocalFillups(arr) {
+      try {
+        localStorage.setItem(FILLUP_KEY, JSON.stringify(arr));
+      } catch (e) {}
+    }
+
+    function localYmTotal(ym) {
+      return loadLocalFillups()
+        .filter((r) => r.ym === ym)
+        .reduce((s, r) => s + (Number(r.paid) || 0), 0);
+    }
+
+    function localYmKm(ym) {
+      return loadLocalFillups()
+        .filter((r) => r.ym === ym)
+        .reduce((s, r) => s + (Number(r.km) || 0), 0);
+    }
+
+    function localMonthTotal() {
+      return localYmTotal(hkYMD().slice(0, 7));
+    }
+
+    function localMonthKm() {
+      return localYmKm(hkYMD().slice(0, 7));
+    }
+
+    // 傳入 YYYY-MM，傳返上個月 YYYY-MM（1 月退返上一年 12 月）
+    function prevYm(ym) {
+      const y = Number(ym.slice(0, 4));
+      const m = Number(ym.slice(5, 7));
+      if (m <= 1) return (y - 1) + "-12";
+      return ym.slice(0, 5) + String(m - 1).padStart(2, "0");
+    }
+
+    function updateMonthTotalLine() {
+      const month = parseInt(hkYMD().slice(5, 7), 10); // 香港時區月份
+
+      // 帳號彈窗入面嘅「X月累計實付」「X月累積里程」框
+      const mLabel = document.getElementById("cloudMonthLabel");
+      const mVal = document.getElementById("cloudMonthTotal");
+      if (mLabel) mLabel.textContent = month + "月累計實付";
+      if (mVal) mVal.textContent = fillupMonthTotal > 0
+        ? "HK$" + neat(fillupMonthTotal, 2)
+        : "HK$0";
+
+      const mkLabel = document.getElementById("cloudMonthKmLabel");
+      const mkVal = document.getElementById("cloudMonthKm");
+      if (mkLabel) mkLabel.textContent = month + "月累積里程";
+      if (mkVal) mkVal.textContent = fillupMonthKm > 0
+        ? neat(fillupMonthKm, 1) + " km"
+        : "0 km";
+
+      // 右邊細字：上個月實付／里程
+      const prevMonth = parseInt(prevYm(hkYMD().slice(0, 7)).slice(5, 7), 10);
+      const prevTotalEl = document.getElementById("cloudPrevTotal");
+      if (prevTotalEl) {
+        prevTotalEl.textContent = prevMonth + "月 HK$" + neat(fillupPrevTotal, 2);
+      }
+      const prevKmEl = document.getElementById("cloudPrevKm");
+      if (prevKmEl) {
+        prevKmEl.textContent = prevMonth + "月 " + neat(fillupPrevKm, 1) + " km";
+      }
+
+      // 實付金額右上角 badge
+      if (els.monthTotalLine) {
+        els.monthTotalLine.textContent = fillupMonthTotal > 0
+          ? month + "月累計 HK$" + neat(fillupMonthTotal, 2)
+          : month + "月暫無記錄";
+      }
+
+      // 今次行駛距離右上角 badge
+      const mkLine = document.getElementById("monthKmLine");
+      if (mkLine) {
+        mkLine.textContent = fillupMonthKm > 0
+          ? month + "月累積 " + neat(fillupMonthKm, 1) + " km"
+          : month + "月暫無記錄";
+      }
+    }
+
+    function recordLocalFillup(paid, km) {
+      const p = Number.isFinite(paid) && paid > 0 ? Number(paid.toFixed(2)) : 0;
+      const k = Number.isFinite(km) && km > 0 ? Number(km.toFixed(1)) : 0;
+      if (p <= 0 && k <= 0) return;
+      const arr = loadLocalFillups();
+      const ymd = hkYMD();
+      const rec = { ym: ymd.slice(0, 7), date: ymd, paid: p };
+      if (k > 0) rec.km = k;
+      arr.push(rec);
+      saveLocalFillups(arr);
+    }
+
+    async function cloudAddFillup(paid, km) {
+      if (!sb || !appState.user) return;
+      const ymd = hkYMD();
+      const row = {
+        user_id: appState.user.id,
+        fill_date: ymd,
+        paid_amount: Number(paid.toFixed(2)),
+        trip_km: Number.isFinite(km) && km > 0 ? Number(km.toFixed(1)) : null,
+        fuel_type: appState.fuelType
+      };
+      const { error } = await sb.from(FILLUP_TABLE).insert(row);
+      if (error) {
+        console.warn("fillup insert failed:", error.message);
+        return;
+      }
+      await cloudLoadMonthTotal();
+    }
+
+    async function cloudLoadMonthTotal() {
+      const ym = hkYMD().slice(0, 7);
+      const pYm = prevYm(ym);
+      if (!sb || !appState.user) {
+        fillupMonthTotal = localYmTotal(ym);
+        fillupMonthKm = localYmKm(ym);
+        fillupPrevTotal = localYmTotal(pYm);
+        fillupPrevKm = localYmKm(pYm);
+        updateMonthTotalLine();
+        return;
+      }
+
+      const nxt = nextYm(ym); // 下個月一號，用 lt 就唔會撞「YYYY-MM-31」無效日期
+      // 一次過撈上個月＋本月（由上個月一號到下個月一號）
+      const { data, error } = await sb
+        .from(FILLUP_TABLE)
+        .select("paid_amount, trip_km, fill_date")
+        .eq("user_id", appState.user.id)
+        .gte("fill_date", pYm + "-01")
+        .lt("fill_date", nxt + "-01");
+
+      if (error) {
+        fillupMonthTotal = localYmTotal(ym);
+        fillupMonthKm = localYmKm(ym);
+        fillupPrevTotal = localYmTotal(pYm);
+        fillupPrevKm = localYmKm(pYm);
+      } else {
+        const curRows = (data || []).filter((r) => String(r.fill_date).slice(0, 7) === ym);
+        const prevRows = (data || []).filter((r) => String(r.fill_date).slice(0, 7) === pYm);
+        fillupMonthTotal = curRows.reduce((s, r) => s + (Number(r.paid_amount) || 0), 0);
+        fillupMonthKm = curRows.reduce((s, r) => s + (Number(r.trip_km) || 0), 0);
+        fillupPrevTotal = prevRows.reduce((s, r) => s + (Number(r.paid_amount) || 0), 0);
+        fillupPrevKm = prevRows.reduce((s, r) => s + (Number(r.trip_km) || 0), 0);
+      }
+      updateMonthTotalLine();
+    }
+
+    async function saveCurrentOdometerAsLast() {
+      const current = numberValue(els.currentOdometer, NaN);
+
+      if (!Number.isFinite(current) || current <= 0) {
+        showStatus("請先輸入有效嘅「今次入油總里數」。");
+        return;
+      }
+
+      const warn = validateInputs();
+      if (warn) {
+        showStatus(warn);
+        return;
+      }
+
+      // 今次行駛里程（今次總里程 − 上次總里程）
+      const prevLast = numberValue(els.lastOdometer, NaN);
+      const valuesNow = calculateEffectiveValues();
+      const tripKm = current - prevLast;
+      let lastCostPerKm = null;
+
+      // 一併記低今次實付金額＋行駛里程（本機 + 雲端），並更新本月累計
+      const paidNow = Number.isFinite(valuesNow.payable) ? valuesNow.payable : 0;
+      const tripKmNow = Number.isFinite(tripKm) && tripKm > 0 ? tripKm : 0;
+      const hasFillup = paidNow > 0 || tripKmNow > 0;
+      if (hasFillup) {
+        recordLocalFillup(paidNow, tripKmNow);
+        fillupMonthTotal += paidNow;
+        fillupMonthKm += tripKmNow;
+        updateMonthTotalLine();
+      }
+
+      // ===== 滿缸法區間結算／累積 =====
+      const curLitresNow = numberValue(els.litres, 0);
+      const isFull = !!(els.fullTankChk && els.fullTankChk.checked);
+      const acc = appState.fullInterval;
+      let intervalMsg = "";
+
+      if (isFull) {
+        // 今次入滿：若已有起點就結算
+        if (acc.open && acc.startOdo != null && current > acc.startOdo) {
+          const totalL = acc.litres + curLitresNow;
+          const totalP = acc.paid + paidNow;
+          const totalD = current - acc.startOdo;
+          if (totalL > 0) {
+            const cost = totalP / totalD;
+            appState.lastInterval = {
+              dist: totalD,
+              litres: totalL,
+              paid: totalP,
+              costPerKm: cost,
+              kmPerL: totalD / totalL,
+              date: hkYMD()
+            };
+            lastCostPerKm = cost;
+            intervalMsg = "已結算（兩次入滿之間）：" + neat(totalL, 2) + " 升、" +
+              neat(totalD, 1) + " km、HK$" + neat(cost, 2) + "/km、" +
+              neat(totalD / totalL, 2) + " km/L。";
+          }
+        } else {
+          intervalMsg = "已將今次入滿設為起點，之後入油自動累計，唔使再入滿。";
+        }
+        // 今次入滿做新區間起點（佢本身嘅升數／金額唔計入新區間）
+        appState.fullInterval = { open: true, startOdo: current, litres: 0, paid: 0 };
+      } else {
+        // 普通入油（冇剔入滿）：未開過就自動開起點並計埋今次，否則一路累積
+        if (!acc.open) {
+          appState.fullInterval = {
+            open: true,
+            startOdo: current,
+            litres: curLitresNow,
+            paid: paidNow
+          };
+          intervalMsg = "已開始自動累計（唔使入滿），下次入油就出到平均油耗。";
+        } else {
+          acc.litres += curLitresNow;
+          acc.paid += paidNow;
+          const dd = current - acc.startOdo;
+          if (dd > 0 && acc.litres > 0) {
+            const avgCost = acc.paid / dd;
+            lastCostPerKm = avgCost;
+            intervalMsg = "已累計：" + neat(acc.litres, 2) + " 升、" + neat(dd, 1) +
+              " km、平均 HK$" + neat(avgCost, 2) + "/km、" + neat(dd / acc.litres, 2) + " km/L。";
+          } else {
+            intervalMsg = "已累計 " + neat(acc.litres, 2) + " 升、HK$" + neat(acc.paid, 2) + "。";
+          }
+        }
+      }
+      if (els.fullTankChk) els.fullTankChk.checked = false;
+
+      els.lastOdometer.value = neat(current, 1);
+      els.currentOdometer.value = "";
+
+      hideStatus();
+      if (intervalMsg) showStatus(intervalMsg);
+      calculate(false);
+      saveState();
+
+      const saveBtn = els.saveOdometerBtn;
+      const origLabel = saveBtn ? saveBtn.textContent : "";
+
+      // 有登入就同步「上次總公里數 + 上次每公里油費 + 今次實付/里程」到呢個帳號
+      if (appState.user) {
+        if (saveBtn) {
+          saveBtn.disabled = true;
+          saveBtn.textContent = "儲存中…";
+        }
+        try {
+          const ok = await cloudSaveRecord(current, lastCostPerKm);
+          if (hasFillup) await cloudAddFillup(paidNow, tripKmNow);
+          showStatus((intervalMsg ? intervalMsg + " " : "") +
+            (ok ? "已同步到你嘅帳號 ✓" : "（雲端同步失敗，本機已存）"));
+        } catch (e) {
+          showStatus((intervalMsg ? intervalMsg + " " : "") +
+            "雲端同步失敗：" + (e && e.message ? e.message : e));
+        } finally {
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = origLabel;
+          }
+        }
+      } else {
+        showStatus((intervalMsg ? intervalMsg + " " : "") +
+          "已存喺呢部機，登入可備份到雲端。");
+      }
+    }
+
+    function bindEvents() {
+      // 唯讀「上次入油總里數」：一點選就失焦，唔彈鍵盤／唔出紅邊
+      els.lastOdometer.addEventListener("focus", () => els.lastOdometer.blur());
+
+      // Esc 關閉任何打開咗嘅彈窗
+      document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        [
+          ["authModal", closeAuthModal],
+          ["wipeModal", closeWipeModal],
+          ["aiModal", closeAiModal]
+        ].forEach(([id, closer]) => {
+          const node = document.getElementById(id);
+          if (node && !node.classList.contains("hidden")) closer();
+        });
+      });
+
+      els.goldBtn.addEventListener("click", () => {
+        flashButton(els.goldBtn);
+        setFuelType("gold");
+      });
+
+      els.platinumBtn.addEventListener("click", () => {
+        flashButton(els.platinumBtn);
+        setFuelType("platinum");
+      });
+
+      els.applyManualBtn.addEventListener("click", () => {
+        flashButton(els.applyManualBtn);
+        applyManualPrices();
+      });
+
+      [
+        els.discountCard,
+        els.customDiscount,
+        els.voucher,
+        els.customVoucher,
+        els.litres,
+        els.lastOdometer,
+        els.currentOdometer,
+        els.fullTankChk,
+        els.manualGoldPrice,
+        els.manualPlatinumPrice
+      ].forEach((el) => {
+        el.addEventListener("input", () => {
+          calculate(false);
+          saveState();
+          if (el === els.currentOdometer || el === els.lastOdometer) {
+            cloudSyncOdometerDebounced();
+          }
+        });
+
+        el.addEventListener("change", () => {
+          calculate(false);
+          saveState();
+          if (el === els.currentOdometer || el === els.lastOdometer) {
+            cloudSyncOdometerDebounced();
+          }
+        });
+      });
+
+      els.calcBtn.addEventListener("click", () => {
+        flashButton(els.calcBtn);
+        hideStatus();
+        els.resultSection.classList.remove("hidden"); // 撳計算先彈出結果
+        calculate(true);
+      });
+
+      els.saveOdometerBtn.addEventListener("click", () => {
+        flashButton(els.saveOdometerBtn);
+        saveCurrentOdometerAsLast();
+      });
+
+      els.loginBtn.addEventListener("click", () => {
+        flashButton(els.loginBtn);
+        handleLogin();
+      });
+
+      els.registerBtn.addEventListener("click", () => {
+        flashButton(els.registerBtn);
+        handleRegister();
+      });
+
+      els.logoutBtn.addEventListener("click", () => {
+        flashButton(els.logoutBtn);
+        handleLogout();
+      });
+
+      // 清除記錄：雙重確認
+      els.wipeBtn.addEventListener("click", () => {
+        flashButton(els.wipeBtn);
+        closeAuthModal();
+        openWipeModal();
+      });
+      els.wipeCloseBtn.addEventListener("click", closeWipeModal);
+      els.wipeCancelBtn.addEventListener("click", closeWipeModal);
+      els.wipeBackBtn.addEventListener("click", () => {
+        els.wipeStep2.classList.add("hidden");
+        els.wipeStep1.classList.remove("hidden");
+      });
+      els.wipeNextBtn.addEventListener("click", () => {
+        flashButton(els.wipeNextBtn);
+        els.wipeStep1.classList.add("hidden");
+        els.wipeStep2.classList.remove("hidden");
+      });
+      els.wipeFinalBtn.addEventListener("click", () => {
+        flashButton(els.wipeFinalBtn);
+        confirmWipeFinal();
+      });
+      // 撳外層關閉
+      els.wipeModal.addEventListener("click", (e) => {
+        if (e.target === els.wipeModal) closeWipeModal();
+      });
+
+      // AI 月度分析
+      els.aiAnalysisBtn.addEventListener("click", () => {
+        flashButton(els.aiAnalysisBtn);
+        runMonthlyAnalysis();
+      });
+      els.aiCloseBtn.addEventListener("click", closeAiModal);
+      els.aiRetryBtn.addEventListener("click", () => {
+        flashButton(els.aiRetryBtn);
+        runMonthlyAnalysis();
+      });
+      els.aiModal.addEventListener("click", (e) => {
+        if (e.target === els.aiModal) closeAiModal();
+      });
+
+      // 密碼欄按 Enter 直接登入
+      els.authPassword.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") handleLogin();
+      });
+
+      els.authOpenBtn.addEventListener("click", () => {
+        flashButton(els.authOpenBtn);
+        openAuthModal();
+      });
+
+      els.authCloseBtn.addEventListener("click", () => {
+        closeAuthModal();
+      });
+
+      // 撳彈窗外層（遮罩）關閉
+      els.authModal.addEventListener("click", (e) => {
+        if (e.target === els.authModal) closeAuthModal();
+      });
+
+      // 按 Esc 關閉
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeAuthModal();
+      });
+    }
+
+    // ===================== 消耗品記錄（第二頁） =====================
+    // 排序：偈油、風格、波箱油行先
+    const CONSUMABLES = [
+      { id: "engine_oil", name: "機油（偈油）" },
+      { id: "air_filter", name: "空氣濾（風格）" },
+      { id: "gearbox_oil", name: "波箱油" },
+      { id: "spark_plug", name: "火嘴" },
+      { id: "cabin_filter", name: "冷氣濾芯" },
+      { id: "brake_pad", name: "剎車皮（制動皮）" },
+      { id: "brake_fluid", name: "剎車油（制動油）" },
+      { id: "coolant", name: "水箱水（防凍液）" },
+      { id: "battery", name: "汽車電池（電瓶）", dateBased: true }
+    ];
+
+    // 各項「已使用」公里數變色門檻（電池係日期制，唔適用）
+    const CONSUM_THRESHOLDS = {
+      engine_oil:   { orange: 6000,  red: 8000,   darkred: 10000 },
+      air_filter:   { orange: 6000,  red: 8000,   darkred: 10000 },
+      cabin_filter: { orange: 6000,  red: 8000,   darkred: 10000 },
+      gearbox_oil:  { orange: 15000, red: 20000,  darkred: 25000 },
+      spark_plug:   { orange: 30000, red: 50000,  darkred: 70000 },
+      brake_pad:    { orange: 50000, red: 70000,  darkred: 80000 },
+      coolant:      { orange: 80000, red: 100000, darkred: 110000 },
+      brake_fluid:  { orange: 30000, red: 40000,  darkred: 50000 }
+    };
+
+    // 電池用：計某日期到而家用咗幾耐（X年Y個月 / X個月 / X日）
+    function elapsedSince(dateStr) {
+      if (!dateStr) return "";
+      const then = new Date(dateStr + "T00:00:00");
+      const now = new Date();
+      if (isNaN(then.getTime())) return "";
+      let years = now.getFullYear() - then.getFullYear();
+      let months = now.getMonth() - then.getMonth();
+      let days = now.getDate() - then.getDate();
+      if (days < 0) {
+        months--;
+        days += new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+      }
+      if (months < 0) {
+        years--;
+        months += 12;
+      }
+      if (years > 0) return years + "年" + months + "個月";
+      if (months > 0) return months + "個月";
+      return Math.max(0, days) + "日";
+    }
+
+    // 電池用：返回由某日期到而家嘅總月數（俾變色門檻用）
+    function elapsedMonths(dateStr) {
+      if (!dateStr) return 0;
+      const then = new Date(dateStr + "T00:00:00");
+      const now = new Date();
+      if (isNaN(then.getTime())) return 0;
+      let months = (now.getFullYear() - then.getFullYear()) * 12 + (now.getMonth() - then.getMonth());
+      if (now.getDate() < then.getDate()) months--;
+      return Math.max(0, months);
+    }
+
+    const CONSUM_KEY = "consumablesStateV1";
+    let consumState = { km: {} };
+    let consumSaveTimer = null;
+
+    function loadConsumState() {
+      try {
+        const raw = localStorage.getItem(CONSUM_KEY);
+        if (raw) consumState = Object.assign({ km: {} }, JSON.parse(raw));
+      } catch (e) {}
+    }
+
+    function saveConsumState() {
+      try {
+        localStorage.setItem(CONSUM_KEY, JSON.stringify(consumState));
+      } catch (e) {}
+    }
+
+    // 現時總里程直接讀主頁「今次入油總里程」，冇就用「上次入油總里程」
+    function currentConsumKm() {
+      // 頂部「現時總里程」顯示用：入油里程＋消耗品輸入＋已儲存嘅上次更換里程，有大取大
+      const vals = [];
+      [els.currentOdometer, els.lastOdometer].forEach((el) => {
+        if (el) {
+          const n = Number(el.value);
+          if (Number.isFinite(n) && n > 0) vals.push(n);
+        }
+      });
+      document.querySelectorAll('[data-input]').forEach((el) => {
+        const n = Number(el.value);
+        if (Number.isFinite(n) && n > 0) vals.push(n);
+      });
+      // 已儲存嘅消耗品上次更換里程（刷新後輸入框空白，都要計入）
+      if (consumState && consumState.km) {
+        Object.values(consumState.km).forEach((v) => {
+          const n = Number(v);
+          if (Number.isFinite(n) && n > 0) vals.push(n);
+        });
+      }
+      return vals.length ? Math.max.apply(null, vals) : null;
+    }
+
+    // 只計入油總里程（上次/今次），唔包括消耗品輸入——俾每項獨立計距離用
+    function fuelOdometerKm() {
+      const vals = [];
+      [els.currentOdometer, els.lastOdometer].forEach((el) => {
+        if (el) {
+          const n = Number(el.value);
+          if (Number.isFinite(n) && n > 0) vals.push(n);
+        }
+      });
+      return vals.length ? Math.max.apply(null, vals) : null;
+    }
+
+    // 雲端用嘅現時總里程：排除「今次入油總里程」，淨計「上次入油總里數」＋消耗品輸入＋已儲存上次更換
+    function cloudCurrentMileage() {
+      const vals = [];
+      if (els.lastOdometer) {
+        const n = Number(els.lastOdometer.value);
+        if (Number.isFinite(n) && n > 0) vals.push(n);
+      }
+      document.querySelectorAll('[data-input]').forEach((el) => {
+        const n = Number(el.value);
+        if (Number.isFinite(n) && n > 0) vals.push(n);
+      });
+      // 已儲存嘅消耗品上次更換里程（刷新後輸入框空白，都要計入）
+      if (consumState && consumState.km) {
+        Object.values(consumState.km).forEach((v) => {
+          const n = Number(v);
+          if (Number.isFinite(n) && n > 0) vals.push(n);
+        });
+      }
+      return vals.length ? Math.max.apply(null, vals) : null;
+    }
+
+    function updateConsumCurrentLine() {
+      const el = document.getElementById("consumCurrentLine");
+      if (!el) return;
+      const cur = currentConsumKm();
+      el.textContent = cur != null
+        ? "現時總里程：" + neat(Number(cur), 1) + " 公里"
+        : "現時總里程：未填（登入自動填入）";
+    }
+
+    // 左邊：長期顯示「已儲存」嘅上次更換里程
+    function renderConsumLast(id) {
+      const el = document.querySelector('[data-last="' + id + '"]');
+      if (!el) return;
+      const item = CONSUMABLES.find((c) => c.id === id);
+      const raw = consumState.km[id];
+      if (raw === undefined || raw === "") {
+        el.textContent = "上次更換：未記錄";
+        return;
+      }
+      el.textContent = item && item.dateBased
+        ? "上次更換：" + raw
+        : "上次更換：" + neat(Number(raw), 1) + " 公里";
+    }
+
+    // 左邊：長期顯示「已使用」
+    // － 電池：日期制，顯示由更換日期到而家幾耐
+    // － 其他：max(入油總里程, 該項自己嘅輸入里程) − 該項上次更換里程，並按門檻變色
+    function updateConsumUsage(id) {
+      const el = document.querySelector('[data-distance="' + id + '"]');
+      if (!el) return;
+      const item = CONSUMABLES.find((c) => c.id === id);
+      const input = document.querySelector('[data-input="' + id + '"]');
+      const saved = consumState.km[id];
+
+      // 預設顏色（淺綠），下面按門檻覆蓋
+      el.style.color = "#86efac";
+
+      // ===== 電池：日期制 =====
+      if (item && item.dateBased) {
+        const dateStr = (input && input.value) || saved;
+        if (!dateStr) {
+          el.textContent = "已使用：未記錄";
+          el.style.color = "var(--muted)";
+          return;
+        }
+        const text = elapsedSince(dateStr);
+        el.textContent = "已使用：" + (text || "--");
+
+        // 電池變色：3年橙、4年紅、5年深紅
+        const m = elapsedMonths(dateStr);
+        if (m >= 60) el.style.color = "#991b1b";      // 深紅（≥5年）
+        else if (m >= 48) el.style.color = "#ef4444"; // 紅（≥4年）
+        else if (m >= 36) el.style.color = "#f97316"; // 橙（≥3年）
+        else el.style.color = "#86efac";              // 預設淺綠
+        return;
+      }
+
+      // ===== 其他：公里制 =====
+      const last = Number(saved);
+      if (saved === undefined || saved === "" || !Number.isFinite(last)) {
+        el.textContent = "已使用：未記錄";
+        el.style.color = "var(--muted)";
+        return;
+      }
+
+      // 已使用 = max(現時總里程, 該項自己輸入) − 上次更換里程（有大取大）
+      let base = currentConsumKm();
+      const inputVal = input ? Number(input.value) : NaN;
+      if (Number.isFinite(inputVal) && inputVal > 0 && (base == null || inputVal > base)) {
+        base = inputVal;
+      }
+
+      if (base == null) {
+        el.textContent = "已使用：--";
+        return;
+      }
+
+      const used = base - last;
+      el.textContent = "已使用：" + neat(used, 1) + " 公里";
+
+      // 按門檻變色
+      const th = CONSUM_THRESHOLDS[id];
+      if (th) {
+        if (used >= th.darkred) el.style.color = "#991b1b";      // 深紅
+        else if (used >= th.red) el.style.color = "#ef4444";     // 紅
+        else if (used >= th.orange) el.style.color = "#f97316";  // 橙
+      }
+    }
+
+    function renderConsumables() {
+      const list = document.getElementById("consumList");
+      list.innerHTML = "";
+
+      CONSUMABLES.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "consum-row";
+
+        const inputTag = item.dateBased
+          ? '<div class="cinput-label">更換日期</div><input type="date" data-input="' + item.id + '" />'
+          : '<input type="number" inputmode="decimal" step="0.1" data-input="' + item.id +
+            '" placeholder="更換時里程" />';
+
+        row.innerHTML =
+          '<div class="cleft">' +
+          '<div class="cname">' + item.name + "</div>" +
+          '<div class="clast" data-last="' + item.id + '"></div>' +
+          '<div class="cdist"><span data-distance="' + item.id + '"></span>' +
+          '<button type="button" class="rule-q" data-rule="' + item.id +
+          '" aria-label="變色規則">?</button></div>' +
+          "</div>" +
+          '<div class="cright">' +
+          inputTag +
+          "</div>";
+
+        list.appendChild(row);
+
+        // 輸入時即時更新全部已使用＋現時總里程，真正儲存要撳底部「儲存」掣
+        row.querySelector("input").addEventListener("input", () => {
+          refreshAllConsumSince();
+          cloudSyncOdometerDebounced();
+        });
+
+        renderConsumLast(item.id);
+        updateConsumUsage(item.id);
+      });
+
+      updateConsumCurrentLine();
+    }
+
+    // 主頁入口圓點：逐項計等級（0 淺綠 / 1 橙 / 2 紅 / 3 深紅），取全部最深色嗰級
+    const CONSUM_LEVEL_COLORS = ["#86efac", "#f97316", "#ef4444", "#991b1b"];
+
+    function consumLevelFor(item) {
+      const id = item.id;
+      const input = document.querySelector('[data-input="' + id + '"]');
+      const saved = consumState.km[id];
+
+      // 電池：日期制（3年橙、4年紅、5年深紅）
+      if (item.dateBased) {
+        const dateStr = (input && input.value) || saved;
+        if (!dateStr) return 0;
+        const m = elapsedMonths(dateStr);
+        if (m >= 60) return 3;
+        if (m >= 48) return 2;
+        if (m >= 36) return 1;
+        return 0;
+      }
+
+      // 公里制：要有上次更換記錄先計
+      const last = Number(saved);
+      if (saved === undefined || saved === "" || !Number.isFinite(last)) return 0;
+
+      let base = currentConsumKm();
+      const inputVal = input ? Number(input.value) : NaN;
+      if (Number.isFinite(inputVal) && inputVal > 0 && (base == null || inputVal > base)) {
+        base = inputVal;
+      }
+      if (base == null) return 0;
+
+      const used = base - last;
+      const th = CONSUM_THRESHOLDS[id];
+      if (!th) return 0;
+      if (used >= th.darkred) return 3;
+      if (used >= th.red) return 2;
+      if (used >= th.orange) return 1;
+      return 0;
+    }
+
+    function worstConsumLevel() {
+      let lv = 0;
+      CONSUMABLES.forEach((it) => {
+        lv = Math.max(lv, consumLevelFor(it));
+      });
+      return lv;
+    }
+
+    function updateEntryDot() {
+      const dot = document.getElementById("ceDot");
+      if (!dot) return;
+      // 未登入唔顯示顏色，直接收埋圓點
+      if (!appState.user) {
+        dot.style.display = "none";
+        return;
+      }
+      dot.style.display = "inline-block";
+      dot.style.background = CONSUM_LEVEL_COLORS[worstConsumLevel()] || "#86efac";
+    }
+
+    function refreshAllConsumSince() {
+      updateConsumCurrentLine();
+      CONSUMABLES.forEach((it) => updateConsumUsage(it.id));
+      updateEntryDot();
+    }
+
+    // 撳「儲存」先將所有輸入寫入記錄（本機 + 雲端）
+    function saveConsumables() {
+      // 由已有記錄開始（保留冇輸入嘅舊記錄），淨係覆蓋「有輸入」嘅項目
+      const next = Object.assign({}, consumState.km || {});
+
+      CONSUMABLES.forEach((item) => {
+        const input = document.querySelector('[data-input="' + item.id + '"]');
+        const v = input ? input.value.trim() : "";
+        if (v !== "") next[item.id] = v;
+      });
+
+      consumState.km = next;
+      saveConsumState();
+
+      CONSUMABLES.forEach((it) => {
+        renderConsumLast(it.id);
+        updateConsumUsage(it.id);
+      });
+
+      if (sb && appState.user) {
+        cloudSaveConsum();
+      } else {
+        setConsumSync("已儲存喺呢部機 ✓（登入帳號可同步到雲端）");
+      }
+    }
+
+    function setConsumSync(text) {
+      const el = document.getElementById("consumSyncLine");
+      if (el) el.textContent = text;
+    }
+
+    // 登入後由雲端攞返消耗品記錄（本機已有嘅值保留，雲端值覆蓋相同項目）
+    async function cloudLoadConsum() {
+      if (!sb || !appState.user) return;
+      setConsumSync("正在由雲端讀取消耗品記錄…");
+
+      const { data, error } = await sb
+        .from(CONSUM_TABLE)
+        .select("*")
+        .eq("user_id", appState.user.id)
+        .maybeSingle();
+
+      if (error) {
+        setConsumSync("雲端讀取失敗：" + error.message + "（已暫用本機記錄）");
+        return;
+      }
+
+      if (data && data.km) {
+        consumState.km = Object.assign({}, consumState.km, data.km);
+        saveConsumState();
+        renderConsumables();
+      }
+      setConsumSync("已同步到你嘅帳號 ✓（換機登入都見到）");
+    }
+
+    async function cloudSaveConsum() {
+      if (!sb || !appState.user) return;
+      setConsumSync("同步中…");
+
+      const row = {
+        user_id: appState.user.id,
+        km: consumState.km,
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await sb
+        .from(CONSUM_TABLE)
+        .upsert(row, { onConflict: "user_id" });
+
+      setConsumSync(error ? "同步失敗：" + error.message : "已同步到你嘅帳號 ✓");
+    }
+
+    function setConsumMode(on) {
+      document.body.classList.toggle("consum-mode", on);
+      if (on) {
+        setFillupsMode(false);
+        setRepairsMode(false);
+        refreshAllConsumSince();
+      }
+      window.scrollTo(0, 0);
+    }
+
+    function openConsumPage() {
+      // 要登入先可以入消耗品記錄
+      if (!appState.user) {
+        openAuthModal();
+        return;
+      }
+      if (location.hash !== "#consumables") {
+        location.hash = "#consumables";
+      } else {
+        setConsumMode(true);
+      }
+    }
+
+    function closeConsumPage() {
+      if (location.hash) {
+        history.pushState("", document.title, location.pathname + location.search);
+      }
+      setConsumMode(false);
+    }
+
+    // ===================== 入油記錄（第二頁） =====================
+    let fillupsListCache = [];
+    let fillupsSelYm = hkYMD().slice(0, 7); // 而家揀緊嘅年月 YYYY-MM
+    let fuPickerBound = false;
+
+    function setFillupsMode(on) {
+      document.body.classList.toggle("fillups-mode", on);
+      if (on) {
+        setConsumMode(false);
+        setRepairsMode(false);
+        fillupsSelYm = hkYMD().slice(0, 7); // 每次開都預設返今個月
+        loadFillupsForPage();
+      }
+      window.scrollTo(0, 0);
+    }
+
+    function openFillupsPage() {
+      if (!appState.user) {
+        openAuthModal();
+        return;
+      }
+      if (location.hash !== "#fillups") {
+        location.hash = "#fillups";
+      } else {
+        setFillupsMode(true);
+      }
+    }
+
+    function closeFillupsPage() {
+      if (location.hash) {
+        history.pushState("", document.title, location.pathname + location.search);
+      }
+      setFillupsMode(false);
+    }
+
+    function mdLabel(dateStr) {
+      const p = String(dateStr).split("-");
+      if (p.length < 3) return dateStr;
+      return Number(p[1]) + "月" + Number(p[2]) + "日";
+    }
+
+    function fuelLabel(f) {
+      if (f === "platinum") return "白金";
+      if (f === "gold") return "黃金";
+      return "";
+    }
+
+    // 撈晒全部入油記錄（登入用雲端，否則用本機），等任何月份都揀到
+    async function loadFillupsForPage() {
+      let rows = [];
+
+      if (sb && appState.user) {
+        const { data, error } = await sb
+          .from(FILLUP_TABLE)
+          .select("fill_date,paid_amount,trip_km,fuel_type")
+          .eq("user_id", appState.user.id)
+          .order("fill_date", { ascending: false });
+        if (!error) {
+          rows = (data || []).map((r) => ({
+            date: r.fill_date,
+            paid: Number(r.paid_amount) || 0,
+            km: Number(r.trip_km) || 0,
+            fuel: r.fuel_type
+          }));
+        }
+      } else {
+        rows = loadLocalFillups().map((r) => ({
+          date: r.date,
+          paid: Number(r.paid) || 0,
+          km: Number(r.km) || 0,
+          fuel: null
+        }));
+      }
+
+      fillupsListCache = rows;
+      setupFuPicker();
+      renderFillupsPage();
+    }
+
+    // 年份揀最早記錄嗰年到今年；月份固定 1–12 月
+    function setupFuPicker() {
+      const yearSel = document.getElementById("fuYearSel");
+      const monthSel = document.getElementById("fuMonthSel");
+      if (!yearSel || !monthSel) return;
+
+      const curYm = hkYMD().slice(0, 7);
+      const curYear = Number(curYm.slice(0, 4));
+      let minYear = curYear;
+      fillupsListCache.forEach((r) => {
+        const y = Number(String(r.date).slice(0, 4));
+        if (Number.isFinite(y) && y < minYear) minYear = y;
+      });
+
+      const years = [];
+      for (let y = curYear; y >= minYear; y--) years.push(y);
+      yearSel.innerHTML = years
+        .map((y) => '<option value="' + y + '">' + y + "年</option>")
+        .join("");
+
+      let mHtml = "";
+      for (let m = 1; m <= 12; m++) {
+        mHtml += '<option value="' + String(m).padStart(2, "0") + '">' + m + "月</option>";
+      }
+      monthSel.innerHTML = mHtml;
+
+      yearSel.value = fillupsSelYm.slice(0, 4);
+      monthSel.value = fillupsSelYm.slice(5, 7);
+
+      if (!fuPickerBound) {
+        fuPickerBound = true;
+        yearSel.addEventListener("change", () => {
+          fillupsSelYm = yearSel.value + "-" + monthSel.value;
+          renderFillupsPage();
+        });
+        monthSel.addEventListener("change", () => {
+          fillupsSelYm = yearSel.value + "-" + monthSel.value;
+          renderFillupsPage();
+        });
+      }
+    }
+
+    function renderFillupsPage() {
+      const box = document.getElementById("fillupsList");
+      if (!box) return;
+
+      const ym = fillupsSelYm;
+      const monthNo = Number(ym.slice(5, 7));
+      const list = fillupsListCache
+        .filter((r) => String(r.date).slice(0, 7) === ym)
+        .sort((a, b) => (a.date < b.date ? 1 : -1));
+
+      const totalPaid = list.reduce((s, r) => s + r.paid, 0);
+      const totalKm = list.reduce((s, r) => s + r.km, 0);
+      const totalText =
+        "總額 HK$" + neat(totalPaid, 2) +
+        (totalKm > 0 ? " · " + neat(totalKm, 1) + " km" : "");
+
+      let rowsHtml;
+      if (!list.length) {
+        rowsHtml = '<div class="fu-empty">冇記錄</div>';
+      } else {
+        rowsHtml = list.map((r) => {
+          const sub = [];
+          if (r.km > 0) sub.push(neat(r.km, 1) + " km");
+          const fl = fuelLabel(r.fuel);
+          if (fl) sub.push(fl);
+          return (
+            '<div class="fu-row">' +
+              '<div class="fu-left">' +
+                '<div class="fu-date">' + mdLabel(r.date) + '</div>' +
+                (sub.length ? '<div class="fu-sub">' + sub.join(" · ") + '</div>' : "") +
+              '</div>' +
+              '<div class="fu-amt">HK$' + neat(r.paid, 2) + '</div>' +
+            '</div>'
+          );
+        }).join("");
+      }
+
+      box.innerHTML =
+        '<div class="fu-group">' +
+          '<div class="fu-head"><span class="fu-month">' + monthNo + "月</span>" +
+          '<span class="fu-total">' + totalText + '</span></div>' +
+          rowsHtml +
+        '</div>';
+    }
+
+    // ===================== 維修記錄（第二頁） =====================
+    let repairsCache = [];
+
+    function escHtml(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function loadLocalRepairs() {
+      try {
+        const raw = localStorage.getItem(REPAIR_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveLocalRepairs(arr) {
+      try { localStorage.setItem(REPAIR_KEY, JSON.stringify(arr)); } catch (e) {}
+    }
+
+    function setRepairSync(text) {
+      const el = document.getElementById("repairSyncLine");
+      if (el) el.textContent = text;
+    }
+
+    function setupRepairPicker() {
+      const yearSel = document.getElementById("repairYearSel");
+      const monthSel = document.getElementById("repairMonthSel");
+      if (!yearSel || !monthSel) return;
+
+      if (!yearSel.options.length) {
+        const curYear = Number(hkYMD().slice(0, 4));
+        let yHtml = "";
+        for (let y = curYear; y >= curYear - 10; y--) {
+          yHtml += '<option value="' + y + '">' + y + "年</option>";
+        }
+        yearSel.innerHTML = yHtml;
+
+        let mHtml = "";
+        for (let m = 1; m <= 12; m++) {
+          mHtml += '<option value="' + String(m).padStart(2, "0") + '">' + m + "月</option>";
+        }
+        monthSel.innerHTML = mHtml;
+      }
+
+      // 每次開都預設返今個月
+      const now = hkYMD();
+      yearSel.value = now.slice(0, 4);
+      monthSel.value = now.slice(5, 7);
+    }
+
+    function setRepairsMode(on) {
+      document.body.classList.toggle("repairs-mode", on);
+      if (on) {
+        setConsumMode(false);
+        setFillupsMode(false);
+        setupRepairPicker();
+        loadRepairs();
+      }
+      window.scrollTo(0, 0);
+    }
+
+    function openRepairsPage() {
+      if (!appState.user) {
+        openAuthModal();
+        return;
+      }
+      if (location.hash !== "#repairs") {
+        location.hash = "#repairs";
+      } else {
+        setRepairsMode(true);
+      }
+    }
+
+    function closeRepairsPage() {
+      if (location.hash) {
+        history.pushState("", document.title, location.pathname + location.search);
+      }
+      setRepairsMode(false);
+    }
+
+    async function loadRepairs() {
+      let rows = [];
+      if (sb && appState.user) {
+        const { data, error } = await sb
+          .from(REPAIR_TABLE)
+          .select("repair_date,item,mileage")
+          .eq("user_id", appState.user.id)
+          .order("repair_date", { ascending: false });
+        if (!error) {
+          rows = (data || []).map((r) => ({
+            date: r.repair_date,
+            item: r.item || "",
+            km: Number(r.mileage) || 0
+          }));
+        } else {
+          rows = loadLocalRepairs();
+        }
+      } else {
+        rows = loadLocalRepairs();
+      }
+      repairsCache = rows;
+      renderRepairs();
+    }
+
+    // 按年月分組，由最近排到最舊
+    function renderRepairs() {
+      const box = document.getElementById("repairList");
+      if (!box) return;
+
+      if (!repairsCache.length) {
+        box.innerHTML = '<div class="rp-empty">未有維修記錄，喺上面輸入第一條。</div>';
+        return;
+      }
+
+      const groups = {};
+      repairsCache.forEach((r) => {
+        const ym = String(r.date).slice(0, 7);
+        (groups[ym] = groups[ym] || []).push(r);
+      });
+
+      // 月份嚴格由最近排到最舊（唔靠插入次序）
+      const ymKeys = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1));
+
+      box.innerHTML = ymKeys.map((ym) => {
+        const y = ym.slice(0, 4);
+        const m = Number(ym.slice(5, 7));
+        // 同一月入面，里程大（較遲換）嘅排前面
+        const inMonth = groups[ym].slice().sort((a, b) => b.km - a.km);
+        const rowsHtml = inMonth.map((r) => (
+          '<div class="rp-row">' +
+            '<div class="rp-item">' + escHtml(r.item) + "</div>" +
+            '<div class="rp-km">' + (r.km > 0 ? neat(r.km, 1) + " km" : "") + "</div>" +
+          "</div>"
+        )).join("");
+        return (
+          '<div class="rp-group">' +
+            '<div class="rp-month">' + y + "年" + m + "月</div>" +
+            rowsHtml +
+          "</div>"
+        );
+      }).join("");
+    }
+
+    async function addRepair() {
+      const itemEl = document.getElementById("repairItem");
+      const kmEl = document.getElementById("repairMileage");
+      const yearSel = document.getElementById("repairYearSel");
+      const monthSel = document.getElementById("repairMonthSel");
+
+      const item = (itemEl.value || "").trim();
+      if (!item) {
+        setRepairSync("請先填寫「換咗咩 / 維修項目」。");
+        return;
+      }
+      const km = Number(kmEl.value);
+      // 年月揀選，統一儲做該月 1 號（配合雲端 date 欄位）
+      const ym = (yearSel.value || hkYMD().slice(0, 4)) + "-" +
+                 (monthSel.value || hkYMD().slice(5, 7));
+      const date = ym + "-01";
+      const record = {
+        date,
+        item,
+        km: Number.isFinite(km) && km > 0 ? km : 0
+      };
+
+      if (sb && appState.user) {
+        setRepairSync("同步中…");
+        const { error } = await sb.from(REPAIR_TABLE).insert({
+          user_id: appState.user.id,
+          repair_date: record.date,
+          item: record.item,
+          mileage: record.km > 0 ? record.km : null
+        });
+        if (error) {
+          // 雲端失敗（例如未建表）就暫存本機
+          const local = loadLocalRepairs();
+          local.push(record);
+          saveLocalRepairs(local);
+          setRepairSync("雲端同步失敗：" + error.message + "（已暫存本機）");
+        } else {
+          setRepairSync("已新增並同步到你嘅帳號 ✓");
+        }
+      } else {
+        const local = loadLocalRepairs();
+        local.push(record);
+        saveLocalRepairs(local);
+      }
+
+      itemEl.value = "";
+      kmEl.value = "";
+      loadRepairs();
+    }
+
+    function syncViewFromHash() {
+      const h = location.hash;
+      if (h === "#consumables") {
+        // 消耗品頁：已登入→入；登入狀態未確認→先留低；確認冇登入→彈主頁
+        if (appState.user || !appState.authReady) {
+          setConsumMode(true);
+        } else {
+          history.pushState("", document.title, location.pathname + location.search);
+          setConsumMode(false);
+        }
+        return;
+      }
+
+      if (h === "#fillups") {
+        if (appState.user || !appState.authReady) {
+          setFillupsMode(true);
+        } else {
+          history.pushState("", document.title, location.pathname + location.search);
+          setFillupsMode(false);
+        }
+        return;
+      }
+
+      if (h === "#repairs") {
+        if (appState.user || !appState.authReady) {
+          setRepairsMode(true);
+        } else {
+          history.pushState("", document.title, location.pathname + location.search);
+          setRepairsMode(false);
+        }
+        return;
+      }
+
+      setConsumMode(false);
+      setFillupsMode(false);
+      setRepairsMode(false);
+    }
+
+    // ===== 「已使用」變色規則懸浮視窗 =====
+    const RULE_COLORS = [
+      { key: "green",   color: "#86efac", label: "正常" },
+      { key: "orange",  color: "#f97316", label: "留意" },
+      { key: "red",     color: "#ef4444", label: "建議更換" },
+      { key: "darkred", color: "#991b1b", label: "盡快更換" }
+    ];
+
+    function buildRuleLines(id) {
+      const item = CONSUMABLES.find((c) => c.id === id);
+      const name = item ? item.name : "";
+
+      // 電池：日期制（3/4/5 年）
+      if (item && item.dateBased) {
+        return {
+          name: name,
+          rows: [
+            { color: "#86efac", text: "未滿 3 年" },
+            { color: "#f97316", text: "滿 3 年" },
+            { color: "#ef4444", text: "滿 4 年" },
+            { color: "#991b1b", text: "滿 5 年" }
+          ]
+        };
+      }
+
+      // 公里制
+      const th = CONSUM_THRESHOLDS[id];
+      if (!th) return { name: name, rows: [] };
+      return {
+        name: name,
+        rows: [
+          { color: "#86efac", text: "未達 " + th.orange.toLocaleString() + " 公里" },
+          { color: "#f97316", text: th.orange.toLocaleString() + " 公里" },
+          { color: "#ef4444", text: th.red.toLocaleString() + " 公里" },
+          { color: "#991b1b", text: th.darkred.toLocaleString() + " 公里" }
+        ]
+      };
+    }
+
+    function openRuleModal(id) {
+      const info = buildRuleLines(id);
+      document.getElementById("ruleTitle").textContent = info.name + "｜已使用變色規則";
+      document.getElementById("ruleBody").innerHTML = info.rows
+        .map((r) =>
+          '<div class="rule-line"><span class="rule-dot" style="background:' + r.color +
+          '"></span><span>' + r.text + "</span></div>"
+        )
+        .join("");
+      document.getElementById("ruleOverlay").classList.add("show");
+    }
+
+    function closeRuleModal() {
+      document.getElementById("ruleOverlay").classList.remove("show");
+    }
+
+    function initConsumables() {
+      loadConsumState();
+      renderConsumables();
+
+      document.getElementById("openConsumBtn").addEventListener("click", openConsumPage);
+      document.getElementById("closeConsumBtn").addEventListener("click", closeConsumPage);
+      document.getElementById("openFillupsBtn").addEventListener("click", openFillupsPage);
+      document.getElementById("closeFillupsBtn").addEventListener("click", closeFillupsPage);
+      document.getElementById("openRepairsBtn").addEventListener("click", openRepairsPage);
+      document.getElementById("closeRepairsBtn").addEventListener("click", closeRepairsPage);
+      document.getElementById("repairAddBtn").addEventListener("click", (e) => {
+        flashButton(e.currentTarget);
+        addRepair();
+      });
+      document.getElementById("consumSaveBtn").addEventListener("click", (e) => {
+        flashButton(e.currentTarget);
+        saveConsumables();
+      });
+
+      // 消耗品頁右上角：已登入就直接登出，未登入就開登入彈窗
+      document.getElementById("consumAuthBtn").addEventListener("click", () => {
+        if (appState.user) {
+          handleLogout();
+        } else {
+          openAuthModal();
+        }
+      });
+
+      // 點迷你「?」開該項變色規則（事件委派，重新 render 都有效）
+      document.getElementById("consumList").addEventListener("click", (e) => {
+        const q = e.target.closest(".rule-q");
+        if (q) {
+          flashButton(q);
+          openRuleModal(q.getAttribute("data-rule"));
+        }
+      });
+
+      document.getElementById("ruleCloseBtn").addEventListener("click", closeRuleModal);
+      document.getElementById("ruleOverlay").addEventListener("click", (e) => {
+        if (e.target.id === "ruleOverlay") closeRuleModal();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeRuleModal();
+      });
+
+      window.addEventListener("hashchange", syncViewFromHash);
+      window.addEventListener("popstate", syncViewFromHash);
+      syncViewFromHash();
+    }
+
+    function init() {
+      bindEvents();
+      renderAuth();
+      initAuth();
+      initConsumables();
+      loadState();
+
+      if (appState.fuelType === "platinum") {
+        setFuelType("platinum");
+      } else {
+        setFuelType("gold");
+      }
+
+      if (appState.prices.gold != null) {
+        els.manualGoldPrice.value = Number(appState.prices.gold).toFixed(2);
+      }
+
+      if (appState.prices.platinum != null) {
+        els.manualPlatinumPrice.value = Number(appState.prices.platinum).toFixed(2);
+      }
+
+      calculate(false);
+      refreshAllConsumSince(); // 載入主頁里程後，刷新消耗品頁「現時總里程/已行」
+      const ymInit = hkYMD().slice(0, 7);
+      const ymInitPrev = prevYm(ymInit);
+      fillupMonthTotal = localYmTotal(ymInit);
+      fillupMonthKm = localYmKm(ymInit);
+      fillupPrevTotal = localYmTotal(ymInitPrev);
+      fillupPrevKm = localYmKm(ymInitPrev);
+      updateMonthTotalLine();
+      reloadOilPrices();
+
+      // 頁面一直開住都會自動重抽油價：每 15 分鐘一次；切返入頁面時，
+      // 若距離上次抽取已超過 10 分鐘先再抽（GitHub Action 每個鐘先變，免頻繁請求）。
+      setInterval(() => {
+        if (!document.hidden) reloadOilPrices();
+      }, 15 * 60 * 1000);
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) return;
+        const since = lastOilFetchAt ? Date.now() - lastOilFetchAt : Infinity;
+        if (since >= 10 * 60 * 1000) reloadOilPrices();
+      });
+    }
+
+    init();
+  </script>
+
+  <!-- PWA service worker 註冊（離線殼＋快取；file:// 開啟會自動略過） -->
+  <script>
+    window.addEventListener("load", () => {
+      if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+        navigator.serviceWorker.register("./sw.js").catch((e) => console.warn("SW register failed:", e));
+      }
+    });
+  </script>
+</body>
+</html>
