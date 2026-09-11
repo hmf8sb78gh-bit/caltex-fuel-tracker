@@ -10,6 +10,11 @@ import requests
 OUTPUT_PATH = "data/oilprice.json"
 SOURCE_URL = "https://oil-price.consumer.org.hk/tc"
 
+# 全局油價走勢表（Supabase）。用 service_role key（擺 GitHub Secret，唔會上網頁）
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+PRICE_TREND_TABLE = "fuel_price_global"
+
 # 兩張「每升汽油價格比較」表嘅表頭（可見文字、順序固定：零售牌價 → 折後價 → 門市折扣）
 # 用表頭做錨點，先切開兩張表，再喺各自區間搵加德士，就唔會互相踩。
 GOLD_TABLE_HEADER = "無鉛汽油 零售牌價 折後價 門市折扣"
@@ -23,6 +28,59 @@ CALTEX_ROW = r"加德士\s*\$?\s*(\d{2}\.\d{2})\s*\$?\s*(\d{2}\.\d{2})"
 def now_hkt():
     hkt = timezone(timedelta(hours=8))
     return datetime.now(hkt).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def today_hkt():
+    hkt = timezone(timedelta(hours=8))
+    return datetime.now(hkt).strftime("%Y-%m-%d")
+
+
+def sync_trend_to_supabase(gold_price, platinum_price):
+    """後台寫走勢：同全局表最後一點唔一樣先 upsert 今日。唔設定就跳過，唔阻主流程。"""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        print("Supabase 未設定（SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY），跳過走勢寫入。")
+        return
+
+    base = f"{SUPABASE_URL}/rest/v1/{PRICE_TREND_TABLE}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    # 拎最後一點
+    r = requests.get(
+        base,
+        headers=headers,
+        params={"select": "price_date,gold,platinum", "order": "price_date.desc", "limit": "1"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    last_rows = r.json()
+    if last_rows:
+        last = last_rows[0]
+        try:
+            if float(last.get("gold")) == float(gold_price) and \
+               float(last.get("platinum")) == float(platinum_price):
+                print("走勢最後一點同而家一樣，唔使寫。")
+                return
+        except (TypeError, ValueError):
+            pass
+
+    # 油價有變（或表仲未有資料）→ upsert 今日（同日用 merge-duplicates 覆蓋）
+    body = {
+        "price_date": today_hkt(),
+        "gold": gold_price,
+        "platinum": platinum_price,
+    }
+    w = requests.post(
+        base,
+        headers={**headers, "Prefer": "resolution=merge-duplicates,return=minimal"},
+        json=body,
+        timeout=30,
+    )
+    w.raise_for_status()
+    print(f"走勢已寫入 Supabase：{body}")
 
 
 def ensure_data_folder():
@@ -150,6 +208,12 @@ def main():
         else:
             print("Prices unchanged; refreshed last-checked timestamp.")
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+        # 後台一齊處理全局走勢：油價同最後一點唔同就寫入（唔阻 json 更新）
+        try:
+            sync_trend_to_supabase(gold_price, platinum_price)
+        except Exception as se:
+            print("Supabase trend sync failed:", str(se))
 
     except Exception as e:
         print("Update failed:", str(e))
