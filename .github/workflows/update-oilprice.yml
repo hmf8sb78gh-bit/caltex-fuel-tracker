@@ -2,10 +2,10 @@ name: Update Oil Price
 
 on:
   schedule:
-  # 每小時 UTC 正點執行一次 = 香港時間每小時正點
-  - cron: "0 * * * *"
+    # 每小時 UTC 正點 = 香港時間每小時正點
+    - cron: "0 * * * *"
 
-  # 可以手動按 Run workflow
+  # 可以手動 Run workflow
   workflow_dispatch:
 
 permissions:
@@ -34,6 +34,9 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run oil price updater
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           python scripts/update_oilprice.py
 
@@ -51,4 +54,3 @@ jobs:
             git pull --rebase
             git push
           fi
- 
