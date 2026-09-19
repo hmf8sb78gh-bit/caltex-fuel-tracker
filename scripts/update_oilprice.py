@@ -91,9 +91,12 @@ def _fetch_official_retail_series(fuel_key):
     raise RuntimeError(f"官方走勢 JSON 搵唔到零售牌價線（{fuel_key}）")
 
 
-def reconcile_trend_to_supabase():
+def reconcile_trend_to_supabase(current_gold=None, current_platinum=None):
     """直接用消委會官方兩年每日牌價重建走勢：淨保留真正變動日，窗口內整張對齊（可自我修正錯日期）。
 
+    current_gold/current_platinum 係今輪喺牌價頁即時爬到嘅價。若官方走勢未出今日、
+    但大牌價已同官方最後一點唔同，就用今日日期加一個「臨時點」；下次官方正式數據一出，
+    整張對齊會自動用官方日期／價取代（證實冇變就刪走），所以臨時點唔會長期標錯。
     唔設定 service key 就跳過，唔阻主流程。只重建官方窗口（約兩年）內嘅列，更早歷史保留。
     """
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
@@ -115,6 +118,22 @@ def reconcile_trend_to_supabase():
         if last is None or abs(cur[0] - last[0]) > 1e-9 or abs(cur[1] - last[1]) > 1e-9:
             rows.append({"price_date": day, "gold": cur[0], "platinum": cur[1]})
             last = cur
+
+    # 官方走勢通常滯後一日：若今日大牌價已同官方最後一點唔同，先用今日日期補一個臨時點。
+    # 下次官方正式數據一出，下面嘅整張對齊會用官方日期／價取代，或證實冇變就刪走。
+    official_last_day = dates[-1]
+    today = today_hkt()
+    if current_gold is not None and current_platinum is not None and today > official_last_day:
+        latest_gold = gold_series[official_last_day]
+        latest_platinum = platinum_series[official_last_day]
+        if abs(float(current_gold) - latest_gold) > 1e-9 or \
+           abs(float(current_platinum) - latest_platinum) > 1e-9:
+            rows.append({
+                "price_date": today,
+                "gold": float(current_gold),
+                "platinum": float(current_platinum),
+            })
+            print(f"官方走勢未出 {today}，大牌價已變，暫時加入臨時點（下次官方更新自動修正）。")
 
     window_start = dates[0]
     base = f"{SUPABASE_URL}/rest/v1/{PRICE_TREND_TABLE}"
@@ -259,9 +278,10 @@ def main():
             print("Prices unchanged; refreshed last-checked timestamp.")
         print(json.dumps(payload, ensure_ascii=False, indent=2))
 
-        # 走勢直接用消委會官方兩年每日牌價對齊重建（淨留真正變動日、自我修正錯日期）
+        # 走勢直接用消委會官方兩年每日牌價對齊重建（淨留真正變動日、自我修正錯日期）；
+        # 大牌價已變但官方未出今日時，補一個今日臨時點
         try:
-            reconcile_trend_to_supabase()
+            reconcile_trend_to_supabase(gold_price, platinum_price)
         except Exception as se:
             print("Supabase trend reconcile failed:", str(se))
 
