@@ -3631,14 +3631,18 @@
       }
     }
 
-    // 走勢＝雲端（權威）＋本機歷史合併：本機保留後台可能漏捕嘅舊變動日，
-    // 同一日以雲端為準，本機只補返雲端冇嘅日子。兩邊都唔會互相刪除。
+    // 走勢來源：後台已由消委會官方兩年每日牌價重建。雲端有足夠官方點（≥10）就以雲端為準，
+    // 確保所有裝置曲線／日期一致；雲端未齊（新表／抓取失敗）先合併本機歷史頂檔，唔會清空。
     function loadPriceHist() {
-      const out = {};
       const local = loadLocalPriceHist();
       const cloud = priceHistCloud || {};
-      for (const k in local) out[k] = local[k];
-      for (const k in cloud) out[k] = cloud[k];
+      if (Object.keys(cloud).length >= 10) {
+        return { ...cloud };
+      }
+      const out = { ...cloud };
+      for (const k in local) {
+        if (!(k in out)) out[k] = local[k];
+      }
       return out;
     }
 
