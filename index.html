@@ -2415,7 +2415,7 @@
       </div>
 
       <div id="priceTrendCard" class="trend-collapse">
-        <div class="chart-title">油價走勢（全部記錄，可左右拉動）</div>
+        <div class="chart-title">油價走勢（預設最近 15 次變動，可拉動睇更早）</div>
         <div id="priceTrendChart" class="chart-box">
           <div class="chart-empty">由今日起記錄，儲齊兩日就會畫出走勢。</div>
         </div>
@@ -3759,18 +3759,32 @@
         el.innerHTML = '<div class="chart-empty">由今日起記錄，儲齊兩日就會畫出油價走勢。</div>';
         return;
       }
-      const many = days.length > 30;
+      const VIEW_COUNT = 15;                          // 預設淨顯示最近 15 次變動
+      const many = days.length > VIEW_COUNT;
+      const startIdx = Math.max(0, days.length - VIEW_COUNT);
       loadECharts(() => {
         const CT = chartTheme();
         const gData = days.map((d) => o[d].g);
         const pData = days.map((d) => o[d].p);
         if (priceChartInst) priceChartInst.dispose();
         priceChartInst = window.echarts.init(el);
-        // 跨年時，每年 1 月標埋年份，其餘日子標 MM-DD
-        const xLabels = days.map((d) => (d.slice(5, 7) === "01" ? d.slice(0, 7) : d.slice(5)));
+        // 預設視窗起點、每年 1 月、同全圖第一點標年份（YYYY-MM），其餘標 MM-DD，避免跨年睇亂
+        const xLabels = days.map((d, i) =>
+          d.slice(5, 7) === "01" || i === 0 || i === startIdx ? d.slice(0, 7) : d.slice(5)
+        );
         const option = {
           grid: { left: 42, right: 14, top: 34, bottom: many ? 44 : 28 },
-          tooltip: { trigger: "axis", valueFormatter: (v) => (v == null ? "-" : "HK$" + v) },
+          tooltip: {
+            trigger: "axis",
+            formatter: (items) => {
+              const idx = items[0].dataIndex;
+              let html = days[idx];
+              items.forEach((it) => {
+                html += `<br/>${it.marker}${it.seriesName}：HK$${it.value}`;
+              });
+              return html;
+            }
+          },
           legend: { top: 2, textStyle: { color: CT.legend, fontSize: 11 }, itemWidth: 14, itemHeight: 8 },
           xAxis: {
             type: "category",
@@ -3788,16 +3802,18 @@
             { name: "白金", type: "line", smooth: true, data: pData, itemStyle: { color: "#60a5fa" }, showSymbol: false }
           ]
         };
-        // 記錄多過 30 日：加觸控拖動／縮放，方便睇幾年走勢
+        // 超過 15 次變動：預設定格喺最近 15 點，可拉動／觸控拖動睇更早歷史
         if (many) {
+          const startPct = (startIdx / days.length) * 100;
           option.dataZoom = [
-            { type: "inside", throttle: 50 },
+            { type: "inside", throttle: 50, start: startPct, end: 100 },
             {
-              type: "slider", height: 16, bottom: 8,
+              type: "slider", height: 16, bottom: 8, start: startPct, end: 100,
               borderColor: CT.zoomBorder,
               fillerColor: "rgba(96,165,250,0.18)",
               handleStyle: { color: "#60a5fa" },
-              textStyle: { color: CT.axis, fontSize: 9 }
+              textStyle: { color: CT.axis, fontSize: 9 },
+              labelFormatter: () => ""
             }
           ];
         }
