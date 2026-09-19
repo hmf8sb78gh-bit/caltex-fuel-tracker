@@ -3768,9 +3768,9 @@
         const pData = days.map((d) => o[d].p);
         if (priceChartInst) priceChartInst.dispose();
         priceChartInst = window.echarts.init(el);
-        // 預設視窗起點、每年 1 月、同全圖第一點標年份（YYYY-MM），其餘標 MM-DD，避免跨年睇亂
+        // 每年 1 月、同全圖最早一點先標年份（YYYY-MM），其餘一律 MM-DD，避免視窗中間彈出年份
         const xLabels = days.map((d, i) =>
-          d.slice(5, 7) === "01" || i === 0 || i === startIdx ? d.slice(0, 7) : d.slice(5)
+          d.slice(5, 7) === "01" || i === 0 ? d.slice(0, 7) : d.slice(5)
         );
         const option = {
           grid: { left: 42, right: 14, top: 34, bottom: many ? 44 : 28 },
@@ -3802,16 +3802,17 @@
             { name: "白金", type: "line", smooth: true, data: pData, itemStyle: { color: "#60a5fa" }, showSymbol: false }
           ]
         };
-        // 超過 15 次變動：預設定格喺最近 15 點，可拉動／觸控拖動睇更早歷史
+        // 超過 5 次變動：只提供下面拉動條；zoomLock 鎖固定 5 點闊度，可平移但唔可以縮放，圖上面唔設手指拖動
         if (many) {
           const startPct = (startIdx / days.length) * 100;
           option.dataZoom = [
-            { type: "inside", throttle: 50, start: startPct, end: 100 },
             {
-              type: "slider", height: 16, bottom: 8, start: startPct, end: 100,
+              type: "slider", height: 18, bottom: 8,
+              start: startPct, end: 100, zoomLock: true,
               borderColor: CT.zoomBorder,
               fillerColor: "rgba(96,165,250,0.18)",
               handleStyle: { color: "#60a5fa" },
+              moveHandleStyle: { color: "#60a5fa" },
               textStyle: { color: CT.axis, fontSize: 9 },
               labelFormatter: () => ""
             }
