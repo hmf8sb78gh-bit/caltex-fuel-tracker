@@ -24,6 +24,21 @@ TABLE_END_MARKER = "使用須知"
 # 加德士一列：加德士 $零售牌價 $折後價 (-門市折扣)
 CALTEX_ROW = r"加德士\s*\$?\s*(\d{2}\.\d{2})\s*\$?\s*(\d{2}\.\d{2})"
 
+# 消委會「油價趨勢」官方 JSON：返兩年每日牌價（ECharts 格式），用嚟重建全局走勢
+CHART_TREND_URL = "https://oil-price.consumer.org.hk/tc/chart/load-data"
+CALTEX_COMPANY_CODE = ":company:14:"
+FUEL_KEY_GOLD = "regular-unleaded-gasoline"
+FUEL_KEY_PLATINUM = "premium-unleaded-gasoline"
+
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0 Safari/537.36"
+    ),
+    "Accept-Language": "zh-HK,zh;q=0.9,en;q=0.8",
+}
+
 
 def now_hkt():
     hkt = timezone(timedelta(hours=8))
@@ -35,12 +50,73 @@ def today_hkt():
     return datetime.now(hkt).strftime("%Y-%m-%d")
 
 
-def sync_trend_to_supabase(gold_price, platinum_price):
-    """後台寫走勢：同全局表最後一點唔一樣先 upsert 今日。唔設定就跳過，唔阻主流程。"""
+def _norm_trend_date(raw):
+    """官方日期係 '2026/9/7'，標準化做 '2026-09-07'。"""
+    y, m, d = str(raw).strip().split("/")
+    return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+
+
+def _fetch_official_retail_series(fuel_key):
+    """向消委會走勢 JSON 拎加德士某燃油（黃金/白金）兩年每日『零售牌價』，回傳 {日期: 牌價}。"""
+    params = {
+        "shortcut": "prev_two_years",
+        "company[]": CALTEX_COMPANY_CODE,
+        "retail_price[]": "true",
+        "auto_fuel_type": fuel_key,
+        "theme": "light",
+    }
+    r = requests.get(
+        CHART_TREND_URL,
+        params=params,
+        headers={**BROWSER_HEADERS, "X-Requested-With": "XMLHttpRequest"},
+        timeout=40,
+    )
+    r.raise_for_status()
+    payload = r.json()
+
+    for series in payload.get("series", []):
+        # 要『零售牌價』嗰條線，唔要『扣除門市折扣及燃油稅』
+        if "零售牌價" not in str(series.get("name", "")):
+            continue
+        out = {}
+        for item in series.get("data", []):
+            try:
+                raw_date, raw_price = item["value"][0], item["value"][1]
+                out[_norm_trend_date(raw_date)] = float(raw_price)
+            except (KeyError, IndexError, TypeError, ValueError):
+                continue
+        if out:
+            return out
+
+    raise RuntimeError(f"官方走勢 JSON 搵唔到零售牌價線（{fuel_key}）")
+
+
+def reconcile_trend_to_supabase():
+    """直接用消委會官方兩年每日牌價重建走勢：淨保留真正變動日，窗口內整張對齊（可自我修正錯日期）。
+
+    唔設定 service key 就跳過，唔阻主流程。只重建官方窗口（約兩年）內嘅列，更早歷史保留。
+    """
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         print("Supabase 未設定（SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY），跳過走勢寫入。")
         return
 
+    gold_series = _fetch_official_retail_series(FUEL_KEY_GOLD)
+    platinum_series = _fetch_official_retail_series(FUEL_KEY_PLATINUM)
+
+    dates = sorted(set(gold_series) & set(platinum_series))
+    if len(dates) < 2:
+        raise RuntimeError("官方走勢日期過少，停止重建以免清空資料")
+
+    # 逐日對比，淨留窗口起點＋黃金或白金有變嘅日子
+    rows = []
+    last = None
+    for day in dates:
+        cur = (gold_series[day], platinum_series[day])
+        if last is None or abs(cur[0] - last[0]) > 1e-9 or abs(cur[1] - last[1]) > 1e-9:
+            rows.append({"price_date": day, "gold": cur[0], "platinum": cur[1]})
+            last = cur
+
+    window_start = dates[0]
     base = f"{SUPABASE_URL}/rest/v1/{PRICE_TREND_TABLE}"
     headers = {
         "apikey": SUPABASE_SERVICE_KEY,
@@ -48,39 +124,22 @@ def sync_trend_to_supabase(gold_price, platinum_price):
         "Content-Type": "application/json",
     }
 
-    # 拎最後一點
-    r = requests.get(
-        base,
-        headers=headers,
-        params={"select": "price_date,gold,platinum", "order": "price_date.desc", "limit": "1"},
+    # 先刪走官方窗口內所有舊列（包括之前誤記、例如無變動都寫入嘅日子），再整批 upsert 官方變動點
+    d = requests.delete(
+        base + f"?price_date=gte.{window_start}",
+        headers={**headers, "Prefer": "return=minimal"},
         timeout=30,
     )
-    r.raise_for_status()
-    last_rows = r.json()
-    if last_rows:
-        last = last_rows[0]
-        try:
-            if float(last.get("gold")) == float(gold_price) and \
-               float(last.get("platinum")) == float(platinum_price):
-                print("走勢最後一點同而家一樣，唔使寫。")
-                return
-        except (TypeError, ValueError):
-            pass
+    d.raise_for_status()
 
-    # 油價有變（或表仲未有資料）→ upsert 今日（同日用 merge-duplicates 覆蓋）
-    body = {
-        "price_date": today_hkt(),
-        "gold": gold_price,
-        "platinum": platinum_price,
-    }
     w = requests.post(
         base,
         headers={**headers, "Prefer": "resolution=merge-duplicates,return=minimal"},
-        json=body,
-        timeout=30,
+        json=rows,
+        timeout=60,
     )
     w.raise_for_status()
-    print(f"走勢已寫入 Supabase：{body}")
+    print(f"走勢已按消委會官方資料重建：{window_start} 起共 {len(rows)} 個變動點。")
 
 
 def ensure_data_folder():
@@ -172,16 +231,7 @@ def main():
     existing = load_existing()
 
     try:
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0 Safari/537.36"
-            ),
-            "Accept-Language": "zh-HK,zh;q=0.9,en;q=0.8",
-        }
-
-        response = requests.get(SOURCE_URL, headers=headers, timeout=30)
+        response = requests.get(SOURCE_URL, headers=BROWSER_HEADERS, timeout=30)
         response.raise_for_status()
 
         gold_price, platinum_price = extract_caltex_prices(response.text)
@@ -209,11 +259,11 @@ def main():
             print("Prices unchanged; refreshed last-checked timestamp.")
         print(json.dumps(payload, ensure_ascii=False, indent=2))
 
-        # 後台一齊處理全局走勢：油價同最後一點唔同就寫入（唔阻 json 更新）
+        # 走勢直接用消委會官方兩年每日牌價對齊重建（淨留真正變動日、自我修正錯日期）
         try:
-            sync_trend_to_supabase(gold_price, platinum_price)
+            reconcile_trend_to_supabase()
         except Exception as se:
-            print("Supabase trend sync failed:", str(se))
+            print("Supabase trend reconcile failed:", str(se))
 
     except Exception as e:
         print("Update failed:", str(e))
