@@ -3832,6 +3832,8 @@
           grid: { left: 42, right: 14, top: 34, bottom: many ? 44 : 28 },
           tooltip: {
             trigger: "axis",
+            triggerOn: "click",
+            confine: true,
             formatter: (items) => {
               const idx = items[0].dataIndex;
               let html = days[idx];
@@ -3903,6 +3905,8 @@
         option.animationEasing = "cubicOut";
         option.animationDelay = (idx) => idx * 120;
         priceChartInst.setOption(option, true);
+        // 開圖唔好自動彈提示卡（手勢／動畫唔會觸發，要撳先出）
+        setTimeout(() => { try { priceChartInst.dispatchAction({ type: "hideTip" }); } catch (e) {} }, 0);
 
         // 一頁 5 點：左右箭嘴 + 滑塊自動貼齊頁位
         const prevBtn = document.getElementById("tzPrev");
@@ -3927,6 +3931,7 @@
           const apply = (s) => {
             s = nearest(s);
             priceChartInst.dispatchAction({ type: "dataZoom", startValue: s, endValue: Math.min(N, s + W) });
+            try { priceChartInst.dispatchAction({ type: "hideTip" }); } catch (e) {}
             syncBtns(s);
           };
           let lock = false;
