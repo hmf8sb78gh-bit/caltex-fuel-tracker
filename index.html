@@ -2415,7 +2415,7 @@
       </div>
 
       <div id="priceTrendCard" class="trend-collapse">
-        <div class="chart-title">油價走勢（預設最近 15 次變動，可拉動睇更早）</div>
+        <div class="chart-title">油價走勢（預設最近 5 次變動，可拉動睇更早）</div>
         <div id="priceTrendChart" class="chart-box">
           <div class="chart-empty">由今日起記錄，儲齊兩日就會畫出走勢。</div>
         </div>
@@ -3759,7 +3759,7 @@
         el.innerHTML = '<div class="chart-empty">由今日起記錄，儲齊兩日就會畫出油價走勢。</div>';
         return;
       }
-      const VIEW_COUNT = 15;                          // 預設淨顯示最近 15 次變動
+      const VIEW_COUNT = 5;                           // 預設淨顯示最近 5 次變動
       const many = days.length > VIEW_COUNT;
       const startIdx = Math.max(0, days.length - VIEW_COUNT);
       loadECharts(() => {
