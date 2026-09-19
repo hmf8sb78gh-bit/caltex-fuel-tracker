@@ -2183,6 +2183,22 @@
     body.light .modal-overlay { background: rgba(15, 23, 42, 0.34); }
     body.light .modal-panel { border-color: #e6ebf3; }
 
+    /* ===== 再現代化微交互（走勢／入口／按鈕） ===== */
+    .trend-collapse.open .chart-title { animation: trendIn 0.38s var(--ease-spring) both; }
+    .trend-collapse.open .tz-wrap { animation: trendIn 0.46s var(--ease-spring) 0.05s both; }
+    @keyframes trendIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: none; }
+    }
+    .consum-entry .ce-arrow { transition: transform 0.22s var(--ease-spring), opacity 0.2s ease; }
+    @media (hover: hover) {
+      .consum-entry:hover .ce-arrow { transform: translateX(4px); }
+      .tz-arrow:hover { border-color: rgba(96, 165, 250, 0.55); color: #93c5fd; }
+    }
+    .trend-toggle:active { transform: scale(0.95); }
+    .segmented button:active { transform: scale(0.96); }
+    .consum-entry { will-change: transform; }
+
     @media (prefers-reduced-motion: reduce) {
       .btn,
       button,
@@ -2193,6 +2209,8 @@
       .btn:hover,
       .consum-entry:hover,
       .trend-toggle:hover { transform: none; }
+      .trend-collapse.open .chart-title,
+      .trend-collapse.open .tz-wrap { animation: none; }
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -3789,8 +3807,21 @@
       const startIdx = Math.max(0, days.length - VIEW_COUNT);
       loadECharts(() => {
         const CT = chartTheme();
-        const gData = days.map((d) => o[d].g);
-        const pData = days.map((d) => o[d].p);
+        // 最後一點用發光圓點標示最新價，其餘隱藏
+        const lastI = days.length - 1;
+        const mkData = (key, rgb) => days.map((d, i) => i === lastI
+          ? { value: o[d][key], itemStyle: { color: rgb, borderColor: "#ffffff", borderWidth: 1.5, shadowBlur: 12, shadowColor: rgb } }
+          : o[d][key]);
+        const gData = mkData("g", "#f59e0b");
+        const pData = mkData("p", "#60a5fa");
+        const grad = (hex, a0) => {
+          const n = parseInt(hex.slice(1), 16);
+          const r = (n >> 16) & 255, gg = (n >> 8) & 255, b = n & 255;
+          return new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: `rgba(${r},${gg},${b},${a0})` },
+            { offset: 1, color: `rgba(${r},${gg},${b},0)` }
+          ]);
+        };
         if (priceChartInst) priceChartInst.dispose();
         priceChartInst = window.echarts.init(el);
         // 每年 1 月、同全圖最早一點先標年份（YYYY-MM），其餘一律 MM-DD，避免視窗中間彈出年份
@@ -3823,28 +3854,54 @@
             splitLine: { lineStyle: { color: CT.split } }
           },
           series: [
-            { name: "黃金", type: "line", smooth: true, data: gData, itemStyle: { color: "#f59e0b" }, showSymbol: false },
-            { name: "白金", type: "line", smooth: true, data: pData, itemStyle: { color: "#60a5fa" }, showSymbol: false }
+            {
+              name: "黃金", type: "line", smooth: true, data: gData,
+              symbol: "circle", showSymbol: true,
+              symbolSize: (v, p) => (p.dataIndex === days.length - 1 ? 8 : 0),
+              lineStyle: { width: 2.6, color: "#f59e0b" },
+              itemStyle: { color: "#f59e0b" },
+              areaStyle: { color: grad("#f59e0b", 0.2) },
+              emphasis: { focus: "series" }, z: 3
+            },
+            {
+              name: "白金", type: "line", smooth: true, data: pData,
+              symbol: "circle", showSymbol: true,
+              symbolSize: (v, p) => (p.dataIndex === days.length - 1 ? 8 : 0),
+              lineStyle: { width: 2.6, color: "#60a5fa" },
+              itemStyle: { color: "#60a5fa" },
+              areaStyle: { color: grad("#60a5fa", 0.18) },
+              emphasis: { focus: "series" }, z: 3
+            }
           ]
         };
-        // 超過 5 次變動：只提供下面拉動條；鎖固定 5 點闊度，拖動／箭嘴都以 5 點為一頁跳動
+        // 超過 5 次變動：極簡拉動條（冇手柄框、冇移動把手），鎖固定 5 點，拖動／箭嘴以 5 點為一頁
         if (many) {
           option.dataZoom = [
             {
-              type: "slider", height: 18, bottom: 6, left: 38, right: 38,
+              type: "slider", height: 8, bottom: 4, left: 40, right: 40,
               startValue: startIdx, endValue: days.length, zoomLock: true,
-              borderColor: CT.zoomBorder,
-              fillerColor: "rgba(96,165,250,0.18)",
-              handleStyle: { color: "#60a5fa" },
-              moveHandleStyle: { color: "#60a5fa" },
-              textStyle: { color: CT.axis, fontSize: 9 },
+              showDetail: false,
+              handleSize: 0, moveHandleSize: 0,
+              borderColor: "transparent",
+              backgroundColor: "rgba(148,163,184,0.16)",
+              fillerColor: "rgba(96,165,250,0.22)",
+              dataBackground: {
+                lineStyle: { color: "rgba(148,163,184,0.4)", width: 1 },
+                areaStyle: { color: "rgba(148,163,184,0.08)" }
+              },
+              selectedDataBackground: {
+                lineStyle: { color: "#60a5fa", width: 1.4 },
+                areaStyle: { color: "rgba(96,165,250,0.12)" }
+              },
               labelFormatter: () => ""
             }
           ];
         }
-        option.animationDuration = 700;
-        option.animationDurationUpdate = 450;
+        // 入場：線條由左至右描邊＋淡入，末端光點最後彈出
+        option.animationDuration = 1100;
+        option.animationDurationUpdate = 500;
         option.animationEasing = "cubicOut";
+        option.animationDelay = (idx) => idx * 120;
         priceChartInst.setOption(option, true);
 
         // 一頁 5 點：左右箭嘴 + 滑塊自動貼齊頁位
