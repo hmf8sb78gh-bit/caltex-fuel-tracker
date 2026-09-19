@@ -1726,6 +1726,23 @@
       height: 240px;
     }
 
+    /* 油價走勢：左右翻頁箭嘴（一頁 5 次變動） */
+    .tz-wrap { position: relative; width: 100%; }
+    .tz-arrow {
+      position: absolute; bottom: 5px; z-index: 6;
+      width: 30px; height: 22px; padding: 0;
+      display: none; align-items: center; justify-content: center;
+      background: var(--card); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+      transition: transform .12s ease, opacity .12s ease;
+    }
+    .tz-arrow.show { display: flex; }
+    .tz-arrow:active { transform: scale(0.9); }
+    .tz-arrow:disabled { opacity: 0.3; cursor: default; }
+    .tz-prev { left: 0; }
+    .tz-next { right: 0; }
+
     .chart-empty {
       height: 100%;
       display: flex;
@@ -2416,8 +2433,16 @@
 
       <div id="priceTrendCard" class="trend-collapse">
         <div class="chart-title">油價走勢（預設最近 5 次變動，可拉動睇更早）</div>
-        <div id="priceTrendChart" class="chart-box">
-          <div class="chart-empty">由今日起記錄，儲齊兩日就會畫出走勢。</div>
+        <div class="tz-wrap">
+          <div id="priceTrendChart" class="chart-box">
+            <div class="chart-empty">由今日起記錄，儲齊兩日就會畫出走勢。</div>
+          </div>
+          <button type="button" class="tz-arrow tz-prev" id="tzPrev" aria-label="上 5 次">
+            <svg viewBox="0 0 24 24" width="15" height="15"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="tz-arrow tz-next" id="tzNext" aria-label="下 5 次">
+            <svg viewBox="0 0 24 24" width="15" height="15"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
         </div>
       </div>
 
@@ -3802,13 +3827,12 @@
             { name: "白金", type: "line", smooth: true, data: pData, itemStyle: { color: "#60a5fa" }, showSymbol: false }
           ]
         };
-        // 超過 5 次變動：只提供下面拉動條；zoomLock 鎖固定 5 點闊度，可平移但唔可以縮放，圖上面唔設手指拖動
+        // 超過 5 次變動：只提供下面拉動條；鎖固定 5 點闊度，拖動／箭嘴都以 5 點為一頁跳動
         if (many) {
-          const startPct = (startIdx / days.length) * 100;
           option.dataZoom = [
             {
-              type: "slider", height: 18, bottom: 8,
-              start: startPct, end: 100, zoomLock: true,
+              type: "slider", height: 18, bottom: 6, left: 38, right: 38,
+              startValue: startIdx, endValue: days.length, zoomLock: true,
               borderColor: CT.zoomBorder,
               fillerColor: "rgba(96,165,250,0.18)",
               handleStyle: { color: "#60a5fa" },
@@ -3822,6 +3846,52 @@
         option.animationDurationUpdate = 450;
         option.animationEasing = "cubicOut";
         priceChartInst.setOption(option, true);
+
+        // 一頁 5 點：左右箭嘴 + 滑塊自動貼齊頁位
+        const prevBtn = document.getElementById("tzPrev");
+        const nextBtn = document.getElementById("tzNext");
+        if (many) {
+          const N = days.length, W = VIEW_COUNT;
+          const starts = [];
+          for (let s = N - W; s > 0; s -= W) starts.push(s);
+          starts.push(0);
+          starts.sort((a, b) => a - b);
+          const nearest = (x) => starts.reduce((best, s) => (Math.abs(s - x) < Math.abs(best - x) ? s : best), starts[0]);
+          const curStart = () => {
+            const dz = priceChartInst.getOption().dataZoom[0];
+            let v = dz.startValue;
+            if (v == null) v = Math.round((dz.start / 100) * N);
+            return nearest(v);
+          };
+          const syncBtns = (s) => {
+            if (prevBtn) prevBtn.disabled = s <= starts[0];
+            if (nextBtn) nextBtn.disabled = s >= starts[starts.length - 1];
+          };
+          const apply = (s) => {
+            s = nearest(s);
+            priceChartInst.dispatchAction({ type: "dataZoom", startValue: s, endValue: Math.min(N, s + W) });
+            syncBtns(s);
+          };
+          let lock = false;
+          priceChartInst.on("dataZoom", () => {
+            if (lock) return;
+            lock = true;
+            apply(curStart());
+            setTimeout(() => { lock = false; }, 0);
+          });
+          if (prevBtn) {
+            prevBtn.classList.add("show");
+            prevBtn.onclick = () => { const i = starts.indexOf(curStart()); if (i > 0) apply(starts[i - 1]); };
+          }
+          if (nextBtn) {
+            nextBtn.classList.add("show");
+            nextBtn.onclick = () => { const i = starts.indexOf(curStart()); if (i < starts.length - 1) apply(starts[i + 1]); };
+          }
+          syncBtns(nearest(N - W));
+        } else {
+          if (prevBtn) prevBtn.classList.remove("show");
+          if (nextBtn) nextBtn.classList.remove("show");
+        }
       });
     }
 
