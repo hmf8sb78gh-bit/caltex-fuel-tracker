@@ -2939,11 +2939,19 @@
     const ANNUAL_KINDS = ["license", "insurance", "inspection", "hmb_north", "hmb_insurance"];
 
     // publishable/anon key 只可公開擺前端，真正隔離靠資料庫 RLS（每個帳號只掂到自己嗰行）
+    // persistSession:false → 登入 session 只留喺記憶體，每次關閉／重新打開 PWA 或網頁都要重新登入
     const sb = window.supabase
       ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-          auth: { persistSession: true, autoRefreshToken: true }
+          auth: { persistSession: false, autoRefreshToken: true }
         })
       : null;
+
+    // 清走舊版持久登入嘅 token（新版唔再長期保留）
+    try {
+      Object.keys(localStorage).forEach((k) => {
+        if (k.indexOf("sb-") === 0 && /-auth-token$/.test(k)) localStorage.removeItem(k);
+      });
+    } catch (e) {}
 
     const DEFAULT_PRICES = {
       gold: null,
@@ -4676,6 +4684,12 @@
           cloudLoadConsum();
           cloudLoadMonthTotal();
           checkDuesReminders();
+        } else {
+          // 冇 session（每次重新打開都要登入）：順手清走上次留低嘅本機記錄
+          appState.user = null;
+          appState.cloudRecord = null;
+          clearLocalRecords();
+          renderAuth();
         }
         appState.authReady = true;
         syncViewFromHash();
