@@ -2219,6 +2219,33 @@
       font-variant-numeric: tabular-nums;
     }
 
+    /* ===== 統一／空狀態／Toast 微優化 ===== */
+    #repairAddBtn { width: 100%; margin-top: 12px; }
+    .chart-box.is-empty { height: auto; min-height: 0; }
+    .chart-box.is-empty .chart-empty { padding: 30px 16px; }
+    select:disabled, select.placeholder-opt { color: var(--muted2); }
+    .account-export-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .account-export-row .btn { flex: 1; min-width: 130px; }
+
+    #appToast {
+      position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom));
+      transform: translate(-50%, 16px);
+      max-width: min(88vw, 420px);
+      background: rgba(17, 24, 39, 0.96);
+      color: #f8fafc;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      box-shadow: 0 18px 44px rgba(2, 6, 23, 0.5);
+      padding: 11px 18px; border-radius: 999px;
+      font-size: 0.86rem; font-weight: 700; text-align: center;
+      opacity: 0; pointer-events: none; z-index: 9999;
+      transition: opacity .25s ease, transform .3s var(--ease-spring, ease);
+      -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    }
+    #appToast.show { opacity: 1; transform: translate(-50%, 0); }
+    body.light #appToast {
+      background: rgba(30, 41, 59, 0.97); color: #fff; border-color: rgba(255,255,255,0.12);
+    }
+
     /* iOS：手機上輸入框最少 16px，杜絕聚焦彈鍵盤時頁面被放大（同時保留大字體設定） */
     @media (max-width: 640px) {
       input, select, textarea { font-size: max(16px, 1em); }
@@ -2444,6 +2471,9 @@
 
           <div class="account-export-row">
             <button type="button" class="btn small-btn blue" id="exportCsvBtn">匯出 CSV</button>
+            <button type="button" class="btn small-btn blue" id="backupBtn">備份 JSON</button>
+            <button type="button" class="btn small-btn" id="restoreBtn">還原備份</button>
+            <input type="file" id="restoreFile" accept="application/json,.json" hidden />
           </div>
         </div>
       </div>
@@ -2686,17 +2716,17 @@
 
       <div class="card">
         <h2 class="chart-title">近 12 個月走勢</h2>
-        <div id="monthTrendChart" class="chart-box">
+        <div id="monthTrendChart" class="chart-box is-empty">
           <div class="chart-empty">未有入油記錄。</div>
         </div>
       </div>
 
       <div class="card">
         <div class="fu-picker">
-          <select id="fuYearSel" aria-label="選擇年份"></select>
-          <select id="fuMonthSel" aria-label="選擇月份"></select>
+          <select id="fuYearSel" aria-label="選擇年份"><option value="" disabled selected>年份</option></select>
+          <select id="fuMonthSel" aria-label="選擇月份"><option value="" disabled selected>月份</option></select>
         </div>
-        <div id="fillupsList"></div>
+        <div id="fillupsList"><div class="fu-empty">未有入油記錄。</div></div>
         <p class="consum-tip">用上面揀年份同月份（12 個月都睇到）；金額同里程由你撳「儲存」時自動記低。撳每條右邊「刪」可移除入錯嘅記錄。</p>
       </div>
     </section>
@@ -2724,8 +2754,8 @@
           <div>
             <label>日期（年份／月份）</label>
             <div class="fu-picker">
-              <select id="repairYearSel" aria-label="維修年份"></select>
-              <select id="repairMonthSel" aria-label="維修月份"></select>
+              <select id="repairYearSel" aria-label="維修年份"><option value="" disabled selected>年份</option></select>
+              <select id="repairMonthSel" aria-label="維修月份"><option value="" disabled selected>月份</option></select>
             </div>
           </div>
         </div>
@@ -2740,7 +2770,7 @@
       </div>
 
       <div class="card">
-        <div id="repairList"></div>
+        <div id="repairList"><div class="fu-empty">未有維修記錄。</div></div>
       </div>
     </section>
 
@@ -3048,6 +3078,17 @@
     function hideStatus() {
       els.loadStatus.textContent = "";
       els.loadStatus.className = "notice";
+    }
+
+    // 底部短提示（自動消失）
+    let toastTimer = null;
+    function showToast(message) {
+      let t = document.getElementById("appToast");
+      if (!t) return;
+      t.textContent = message;
+      t.classList.add("show");
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
     }
 
     function flashButton(button) {
@@ -4022,6 +4063,7 @@
     function renderMonthlyTrend() {
       const el = document.getElementById("monthTrendChart");
       if (!el) return;
+      el.classList.remove("is-empty");
       const rows = fillupsListCache || [];
       // 聚合近 12 個月
       const agg = {};
@@ -4047,6 +4089,7 @@
       });
 
       if (!rows.length) {
+        el.classList.add("is-empty");
         el.innerHTML = '<div class="chart-empty">未有入油記錄，儲存後會顯示近 12 個月走勢。</div>';
         return;
       }
@@ -4826,6 +4869,15 @@
       const tripKmNow = Number.isFinite(tripKm) && tripKm > 0 ? tripKm : 0;
       const hasFillup = paidNow > 0 || tripKmNow > 0;
       if (hasFillup) {
+        // 重複防呆：同日同金額同里程再儲，問一問先好入賬
+        const todayYmd = hkYMD();
+        const prior = (fillupsListCache || []).concat(loadLocalFillups());
+        const isDup = prior.some((r) => r.date === todayYmd &&
+          Math.abs((Number(r.paid) || 0) - paidNow) < 0.02 &&
+          Math.abs((Number(r.km) || 0) - tripKmNow) < 0.2);
+        if (isDup && !window.confirm("今日已經儲存過一筆相同金額同里程嘅記錄，係咪要再儲存多次？")) {
+          return;
+        }
         recordLocalFillup(paidNow, tripKmNow, current);
         fillupMonthTotal += paidNow;
         fillupMonthKm += tripKmNow;
@@ -4912,6 +4964,7 @@
           if (hasFillup) await cloudAddFillup(paidNow, tripKmNow, current);
           showStatus((intervalMsg ? intervalMsg + " " : "") +
             (ok ? "已同步到你嘅帳號 ✓" : "（雲端同步失敗，本機已存）"));
+          if (ok) showToast("已儲存並同步雲端 ✓");
         } catch (e) {
           showStatus((intervalMsg ? intervalMsg + " " : "") +
             "雲端同步失敗：" + (e && e.message ? e.message : e));
@@ -5086,6 +5139,23 @@
         flashButton(els.exportCsvBtn);
         exportCsv();
       });
+      const backupBtn = document.getElementById("backupBtn");
+      if (backupBtn) backupBtn.addEventListener("click", () => {
+        flashButton(backupBtn);
+        exportBackup();
+      });
+      const restoreBtn = document.getElementById("restoreBtn");
+      const restoreFile = document.getElementById("restoreFile");
+      if (restoreBtn && restoreFile) {
+        restoreBtn.addEventListener("click", () => {
+          flashButton(restoreBtn);
+          restoreFile.value = "";
+          restoreFile.click();
+        });
+        restoreFile.addEventListener("change", () => {
+          if (restoreFile.files && restoreFile.files[0]) importBackupFile(restoreFile.files[0]);
+        });
+      }
 
       // 主頁半框入「到期提醒」二級頁
       const openDuesEntry = document.getElementById("openDuesEntry");
@@ -5580,6 +5650,7 @@
         cloudSaveConsum();
       } else {
         setConsumSync("已儲存喺呢部機 ✓（登入帳號可同步到雲端）");
+        showToast("已儲存喺呢部機");
       }
       renderExpenseSummary();
     }
@@ -5632,6 +5703,7 @@
         .upsert(row, { onConflict: "user_id" });
 
       setConsumSync(error ? "同步失敗：" + error.message : "已同步到你嘅帳號 ✓");
+      if (!error) showToast("消耗品記錄已儲存並同步 ✓");
     }
 
     function setConsumMode(on) {
@@ -6117,11 +6189,13 @@
           setRepairSync("雲端同步失敗：" + error.message + "（已暫存本機）");
         } else {
           setRepairSync("已新增並同步到你嘅帳號 ✓");
+          showToast("維修記錄已儲存並同步 ✓");
         }
       } else {
         const local = loadLocalRepairs();
         local.push(record);
         saveLocalRepairs(local);
+        showToast("已儲存喺呢部機");
       }
 
       itemEl.value = "";
@@ -6235,6 +6309,103 @@
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    // ===================== JSON 一鍵備份／還原 =====================
+    const BACKUP_LOCAL_KEYS = [STORAGE_KEY, FILLUP_KEY, REPAIR_KEY, DUES_KEY, CONSUM_KEY];
+    const BACKUP_TABLES = [
+      ["profile", CLOUD_TABLE],
+      ["consumables", CONSUM_TABLE],
+      ["fillups", FILLUP_TABLE],
+      ["repairs", REPAIR_TABLE],
+      ["dues", DUES_TABLE]
+    ];
+
+    async function exportBackup() {
+      const payload = {
+        app: "caltex-fuel-tracker",
+        version: 1,
+        exported_at: new Date().toISOString(),
+        local: {},
+        cloud: {}
+      };
+      BACKUP_LOCAL_KEYS.forEach((k) => {
+        try {
+          const v = localStorage.getItem(k);
+          if (v != null) payload.local[k] = v;
+        } catch (e) {}
+      });
+      if (sb && appState.user) {
+        for (const [name, table] of BACKUP_TABLES) {
+          try {
+            const { data, error } = await sb.from(table).select("*").eq("user_id", appState.user.id);
+            if (!error) payload.cloud[name] = data || [];
+          } catch (e) {}
+        }
+      }
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "加德士備份_" + hkYMD() + ".json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast("已匯出備份檔 ✓");
+    }
+
+    function importBackupFile(file) {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        let payload;
+        try {
+          payload = JSON.parse(String(reader.result || ""));
+        } catch (e) {
+          alert("還原失敗：檔案唔係有效嘅 JSON 備份。");
+          return;
+        }
+        if (!payload || payload.app !== "caltex-fuel-tracker" || (!payload.local && !payload.cloud)) {
+          alert("還原失敗：呢個檔案唔係本站嘅備份。");
+          return;
+        }
+        if (!window.confirm("還原會用備份覆蓋而家嘅記錄，確定繼續？")) return;
+
+        // 本機部分
+        if (payload.local) {
+          Object.keys(payload.local).forEach((k) => {
+            try { localStorage.setItem(k, payload.local[k]); } catch (e) {}
+          });
+        }
+
+        // 雲端部分：每張表剷走自己嘅舊行，再寫入備份（強制歸入而家登入嘅帳號）
+        if (sb && appState.user && payload.cloud) {
+          try {
+            for (const [name, table] of BACKUP_TABLES) {
+              const rows = payload.cloud[name];
+              if (!Array.isArray(rows) || !rows.length) continue;
+              await sb.from(table).delete().eq("user_id", appState.user.id);
+              const clean = rows.map((r) => {
+                const o = Object.assign({}, r);
+                delete o.id;
+                o.user_id = appState.user.id;
+                return o;
+              });
+              // 分批，避免一次過太多行
+              for (let i = 0; i < clean.length; i += 100) {
+                const { error } = await sb.from(table).insert(clean.slice(i, i + 100));
+                if (error) { console.warn("restore insert failed:", table, error.message); }
+              }
+            }
+          } catch (e) {
+            alert("雲端還原中途出錯：" + (e && e.message ? e.message : e) + "\n本機部分已還原，請重新整理再試。");
+            return;
+          }
+        }
+        showToast("還原完成，重新整理中…");
+        setTimeout(() => location.reload(), 700);
+      };
+      reader.readAsText(file);
     }
 
     // ===================== 到期提醒 / 固定開支（牌費・保險・驗車・停車場） =====================
@@ -6500,10 +6671,11 @@
         if (error) {
           const local = loadLocalDues(); local.push(record); saveLocalDues(local);
           setDueSync("雲端失敗：" + error.message + "（已暫存本機）");
-        } else { setDueSync("已記低繳費並同步 ✓"); }
+        } else { setDueSync("已記低繳費並同步 ✓"); showToast("停車場費已記錄 ✓"); }
       } else {
         const local = loadLocalDues(); local.push(record); saveLocalDues(local);
         setDueSync("已記低本機（登入可同步雲端）");
+        showToast("已記錄喺呢部機");
       }
       amtEl.value = "";
       await loadDues();
@@ -6591,6 +6763,7 @@
       }
       closeDueEdit();
       await loadDues();
+      showToast("已儲存到期資料 ✓");
     }
 
     async function deleteDue(id) {
@@ -6928,6 +7101,7 @@
   </script>
 
   <!-- PWA service worker 註冊（離線殼＋快取；file:// 開啟會自動略過） -->
+  <div id="appToast" role="status" aria-live="polite"></div>
   <script>
     window.addEventListener("load", () => {
       if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
