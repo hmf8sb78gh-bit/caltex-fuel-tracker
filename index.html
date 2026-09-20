@@ -2183,6 +2183,47 @@
     body.light .modal-overlay { background: rgba(15, 23, 42, 0.34); }
     body.light .modal-panel { border-color: #e6ebf3; }
 
+    /* ===== 牌價載入骨架＋重試掣 ===== */
+    .fuel-pill.loading .v { color: transparent !important; }
+    .fuel-pill.loading .v::after {
+      content: "";
+      position: absolute; inset: 2px 0;
+      border-radius: 7px;
+      background: linear-gradient(90deg, rgba(148,163,184,0.10) 25%, rgba(148,163,184,0.30) 37%, rgba(148,163,184,0.10) 63%);
+      background-size: 400% 100%;
+      animation: skelShine 1.25s ease-in-out infinite;
+    }
+    .fuel-pill .v { position: relative; }
+    body.light .fuel-pill.loading .v::after {
+      background: linear-gradient(90deg, #eef2f8 25%, #dbe3f0 37%, #eef2f8 63%);
+      background-size: 400% 100%;
+    }
+    @keyframes skelShine {
+      0% { background-position: 100% 0; }
+      100% { background-position: 0 0; }
+    }
+    .retry-mini {
+      display: inline-flex; align-items: center;
+      margin-left: 6px; padding: 3px 12px;
+      min-height: 0; border-radius: 999px;
+      border: 1px solid rgba(249,115,22,0.55);
+      background: rgba(249,115,22,0.14);
+      color: #fb923c; font-weight: 800; font-size: 0.82rem;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    .retry-mini:active { transform: scale(0.94); }
+    body.light .retry-mini { background: rgba(249,115,22,0.1); }
+
+    /* 數值統一等寬，跳字／更新時唔會左右搖 */
+    .v, .big, .sub, .result, .exp-cell, .price-box, .fuel-pill, .due-view strong {
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* iOS：手機上輸入框最少 16px，杜絕聚焦彈鍵盤時頁面被放大（同時保留大字體設定） */
+    @media (max-width: 640px) {
+      input, select, textarea { font-size: max(16px, 1em); }
+    }
+
     /* ===== 再現代化微交互（走勢／入口／按鈕） ===== */
     .trend-collapse.open .chart-title { animation: trendIn 0.38s var(--ease-spring) both; }
     .trend-collapse.open .tz-wrap { animation: trendIn 0.46s var(--ease-spring) 0.05s both; }
@@ -3378,8 +3419,9 @@
     }
 
     function updateTopFuelSummary(values) {
-      tweenPumpPrice(values.pumpPrice);
-      if (Number.isFinite(values.realPerLitre) && Number.isFinite(values.pumpPrice)) {
+      // 未載到真價（0／無效）時保持「--」，唔好顯示 HK$0 誤導
+      tweenPumpPrice(values.pumpPrice > 0 ? values.pumpPrice : NaN);
+      if (Number.isFinite(values.realPerLitre) && Number.isFinite(values.pumpPrice) && values.pumpPrice > 0) {
         const savePerLitre = values.pumpPrice - values.realPerLitre;
         els.topSavePerLitre.textContent = "減 $" + neat(savePerLitre, 2);
         els.topListPrice.innerHTML = "牌價：<s>" + money(values.pumpPrice) + "</s>";
@@ -3907,6 +3949,10 @@
         priceChartInst.setOption(option, true);
         // 開圖唔好自動彈提示卡（手勢／動畫唔會觸發，要撳先出）
         setTimeout(() => { try { priceChartInst.dispatchAction({ type: "hideTip" }); } catch (e) {} }, 0);
+        // 撳圖表空白位收起提示卡
+        priceChartInst.getZr().on("click", (e) => {
+          if (!e.target) { try { priceChartInst.dispatchAction({ type: "hideTip" }); } catch (err) {} }
+        });
 
         // 一頁 5 點：左右箭嘴 + 滑塊自動貼齊頁位
         const prevBtn = document.getElementById("tzPrev");
@@ -4042,6 +4088,8 @@
 
     async function reloadOilPrices() {
       hideStatus();
+      const pumpPill = els.topPumpPrice ? els.topPumpPrice.closest(".fuel-pill") : null;
+      if (pumpPill) pumpPill.classList.add("loading");
 
       try {
         const data = await fetchOilPriceData();
@@ -4067,6 +4115,7 @@
 
         els.manualBox.classList.add("hidden");
         hideStatus();
+        if (pumpPill) pumpPill.classList.remove("loading");
         recordPriceHistory(appState.prices.gold, appState.prices.platinum);
         renderPriceTrend();
         calculate(false);
@@ -4074,9 +4123,11 @@
       } catch (error) {
         console.error(error);
 
-        showStatus(
-          "未能自動讀取油價，請手動輸入油價。"
-        );
+        if (pumpPill) pumpPill.classList.remove("loading");
+        els.loadStatus.className = "notice show";
+        els.loadStatus.innerHTML = '未能自動讀取油價，請手動輸入，或<button type="button" class="retry-mini" id="retryPriceBtn">重試</button>';
+        const retryBtn = $("retryPriceBtn");
+        if (retryBtn) retryBtn.addEventListener("click", () => reloadOilPrices());
 
         els.manualBox.classList.remove("hidden");
         calculate(false);
