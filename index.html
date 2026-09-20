@@ -4337,6 +4337,25 @@
       renderExpenseSummary();
     }
 
+    // 舊帳號一次性修正：第一次入油唔計油耗，將基準重設為最新總里程，之前累積作廢
+    function migrateBaselineOnce(latestOdo) {
+      const acc = appState.fullInterval || {};
+      if (acc.baselineV2) return false;
+      if (Number.isFinite(latestOdo) && latestOdo > 0) {
+        appState.fullInterval = {
+          open: true,
+          startOdo: Number(latestOdo.toFixed(1)),
+          litres: 0,
+          paid: 0,
+          baselineV2: true
+        };
+      } else {
+        appState.fullInterval = Object.assign({}, acc, { open: acc.open || false, baselineV2: true });
+      }
+      appState.lastInterval = null;
+      return true;
+    }
+
     async function cloudLoadRecord() {
       if (!sb || !appState.user) return;
       setSyncLine("正在由雲端讀取你嘅記錄…");
@@ -4368,6 +4387,20 @@
         }
         if (data.last_interval && typeof data.last_interval === "object") {
           appState.lastInterval = data.last_interval;
+        }
+        // 舊帳號一次性修正：第一次入油唔計油耗，基準重設做最新里程
+        const cloudInterval = data.full_interval && typeof data.full_interval === "object"
+          ? data.full_interval : null;
+        if (!cloudInterval || !cloudInterval.baselineV2) {
+          const latestOdo = Number(data.last_odometer);
+          const changed = migrateBaselineOnce(Number.isFinite(latestOdo) ? latestOdo : NaN);
+          if (changed) {
+            calculate(false);
+            saveState();
+            if (Number.isFinite(latestOdo) && latestOdo > 0) {
+              cloudSaveRecord(latestOdo, null); // 將新基準同步返雲端
+            }
+          }
         }
         // 注意：「今次入油總里程」同「燃油種類」都唔由雲端還原；
         // 燃油種類預設跟實際每升平嗰款，除非用戶今次自己撳過。
@@ -4860,6 +4893,44 @@
 
       // 今次行駛里程（今次總里程 − 上次總里程）
       const prevLast = numberValue(els.lastOdometer, NaN);
+
+      // 新帳號第一次：淨係記低基準里程，唔計油耗、唔入賬，否則由 0 到而家嘅大里程會計壞
+      const cloudLast0 = appState.cloudRecord && appState.cloudRecord.last_odometer != null
+        ? Number(appState.cloudRecord.last_odometer) : NaN;
+      const firstBaseline =
+        (!Number.isFinite(prevLast) || prevLast <= 0) &&
+        (!Number.isFinite(cloudLast0) || cloudLast0 <= 0) &&
+        (!appState.fullInterval || !appState.fullInterval.open) &&
+        (!fillupsListCache || !fillupsListCache.length) &&
+        !loadLocalFillups().length;
+      if (firstBaseline) {
+        appState.fullInterval = { open: true, startOdo: current, litres: 0, paid: 0, baselineV2: true };
+        if (els.fullTankChk) els.fullTankChk.checked = false;
+        els.lastOdometer.value = neat(current, 1);
+        els.currentOdometer.value = "";
+        hideStatus();
+        showStatus("第一次只記低基準里程，由下次入油先開始計油耗同每公里油費。");
+        calculate(false);
+        saveState();
+
+        const bBtn = els.saveOdometerBtn;
+        const bLabel = bBtn ? bBtn.textContent : "";
+        if (appState.user) {
+          if (bBtn) { bBtn.disabled = true; bBtn.textContent = "儲存中…"; }
+          try {
+            const ok = await cloudSaveRecord(current, null);
+            if (ok) showToast("已記低基準里程，下次入油先計油耗 ✓");
+          } catch (e) {
+            showStatus("基準已存本機；雲端同步失敗：" + (e && e.message ? e.message : e));
+          } finally {
+            if (bBtn) { bBtn.disabled = false; bBtn.textContent = bLabel; }
+          }
+        } else {
+          showToast("已記低基準里程，下次入油先計油耗");
+        }
+        return;
+      }
+
       const valuesNow = calculateEffectiveValues();
       const tripKm = current - prevLast;
       let lastCostPerKm = null;
@@ -4915,7 +4986,7 @@
           intervalMsg = "已將今次入滿設為起點，之後入油自動累計，唔使再入滿。";
         }
         // 今次入滿做新區間起點（佢本身嘅升數／金額唔計入新區間）
-        appState.fullInterval = { open: true, startOdo: current, litres: 0, paid: 0 };
+        appState.fullInterval = { open: true, startOdo: current, litres: 0, paid: 0, baselineV2: true };
       } else {
         // 普通入油（冇剔入滿）：未開過就自動開起點並計埋今次，否則一路累積
         if (!acc.open) {
@@ -4923,7 +4994,8 @@
             open: true,
             startOdo: current,
             litres: curLitresNow,
-            paid: paidNow
+            paid: paidNow,
+            baselineV2: true
           };
           intervalMsg = "已開始自動累計（唔使入滿），下次入油就出到平均油耗。";
         } else {
@@ -7051,6 +7123,12 @@
       initAuth();
       initConsumables();
       loadState();
+
+      // 未登入嘅本機舊資料：同樣一次性將基準重設做最新里程
+      if (!appState.user) {
+        const lo = Number(appState.lastOdometer);
+        if (migrateBaselineOnce(Number.isFinite(lo) ? lo : NaN)) saveState();
+      }
 
       if (appState.fuelType === "platinum") {
         setFuelType("platinum");
