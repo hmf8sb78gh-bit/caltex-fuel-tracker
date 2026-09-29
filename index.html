@@ -2246,6 +2246,28 @@
       background: rgba(30, 41, 59, 0.97); color: #fff; border-color: rgba(255,255,255,0.12);
     }
 
+    /* ===== 其他油站模式：自己入牌價，淨計油耗 ===== */
+    .other-toggle {
+      width: 100%; margin: 12px 0 4px;
+      padding: 10px 14px; border-radius: 12px;
+      border: 1px dashed var(--border);
+      background: transparent; color: var(--muted);
+      font-size: 0.82rem; font-weight: 700; cursor: pointer;
+      transition: all .25s ease;
+    }
+    .other-toggle:hover { border-color: var(--orange); color: var(--orange); }
+    .other-toggle.on {
+      border-style: solid; border-color: var(--orange);
+      background: rgba(249, 115, 22, 0.12); color: var(--orange);
+    }
+    #otherBox { margin: 10px 0 4px; }
+    body.other-brand #fuelSegmented,
+    body.other-brand #fuelCompare,
+    body.other-brand #loadStatus,
+    body.other-brand #manualBox,
+    body.other-brand .caltex-only { display: none !important; }
+    body.other-brand #otherBox { display: block; animation: panelRise .35s ease; }
+
     /* iOS：手機上輸入框最少 16px，杜絕聚焦彈鍵盤時頁面被放大（同時保留大字體設定） */
     @media (max-width: 640px) {
       input, select, textarea { font-size: max(16px, 1em); }
@@ -2543,6 +2565,16 @@
 
       <div class="fuel-compare" id="fuelCompare"></div>
 
+      <button type="button" class="other-toggle" id="otherBrandToggle">其他油站入油（自己入牌價，淨計油耗）</button>
+
+      <div id="otherBox" class="hidden">
+        <label for="otherPrice">其他油站牌價，每升 HK$</label>
+        <div class="input-unit">
+          <input id="otherPrice" type="number" inputmode="decimal" step="0.01" placeholder="例如 32.5" />
+          <span class="unit-suffix">/升</span>
+        </div>
+      </div>
+
       <div class="fuel-summary">
         <div class="fuel-pill">
           <div class="k">牌價</div>
@@ -2571,7 +2603,7 @@
         </div>
       </div>
 
-      <div class="row two">
+      <div class="row two caltex-only">
         <div>
           <label for="discountCard">折扣卡</label>
           <select id="discountCard">
@@ -2589,7 +2621,7 @@
         </div>
       </div>
 
-      <div class="row two">
+      <div class="row two caltex-only">
         <div>
           <label for="voucher">油券</label>
           <select id="voucher">
@@ -2963,6 +2995,7 @@
 
     let appState = {
       fuelType: "gold",
+      otherBrand: false,   // 其他油站模式：牌價自己入，淨計油耗
       prices: { ...DEFAULT_PRICES },
       user: null,           // 目前登入用戶
       cloudRecord: null,    // 由雲端讀返嘅記錄 {last_odometer,last_consumption,...}
@@ -2977,6 +3010,9 @@
     const els = {
       goldBtn: $("goldBtn"),
       platinumBtn: $("platinumBtn"),
+      otherBrandToggle: $("otherBrandToggle"),
+      otherBox: $("otherBox"),
+      otherPrice: $("otherPrice"),
 
       topPumpPrice: $("topPumpPrice"),
       topSavePerLitre: $("topSavePerLitre"),
@@ -3126,6 +3162,7 @@
       const data = {
         version: 8,
         fuelType: appState.fuelType,
+        otherBrand: !!appState.otherBrand,
         prices: appState.prices,
         fullInterval: appState.fullInterval,
         lastInterval: appState.lastInterval,
@@ -3158,6 +3195,7 @@
         const data = JSON.parse(raw);
 
         if (data.fuelType) appState.fuelType = data.fuelType;
+        appState.otherBrand = !!data.otherBrand;
 
         if (data.fullInterval) {
           appState.fullInterval = Object.assign(
@@ -3211,7 +3249,19 @@
       saveState();
     }
 
+    function setOtherBrand(on) {
+      appState.otherBrand = !!on;
+      document.body.classList.toggle("other-brand", !!on);
+      if (els.otherBrandToggle) els.otherBrandToggle.classList.toggle("on", !!on);
+      if (els.otherBox) els.otherBox.classList.toggle("hidden", !on);
+      calculate(false);
+      saveState();
+    }
+
     function getCurrentPumpPrice() {
+      if (appState.otherBrand) {
+        return numberValue(els.otherPrice, NaN);
+      }
       return appState.fuelType === "gold"
         ? Number(appState.prices.gold)
         : Number(appState.prices.platinum);
@@ -3293,6 +3343,22 @@
         payable: NaN,
         realPerLitre: NaN
       };
+
+      // 其他油站：牌價自己入、冇折扣卡同油券，淨係 牌價×升數，重點用嚟計油耗
+      if (appState.otherBrand) {
+        const oL = Math.max(0, litres);
+        if (!Number.isFinite(pumpPrice) || pumpPrice <= 0 || oL <= 0) return empty;
+        const oTotal = pumpPrice * oL;
+        return Object.assign({}, empty, {
+          listTotal: oTotal,
+          billedAmount: oTotal,
+          billedLitres: oL,
+          cardDiscountTotal: 0,
+          cardNetPerLitre: pumpPrice,
+          payable: oTotal,
+          realPerLitre: pumpPrice
+        });
+      }
 
       if (!Number.isFinite(pumpPrice) || pumpPrice <= 0) {
         return empty;
@@ -4838,7 +4904,7 @@
         paid_amount: Number(paid.toFixed(2)),
         trip_km: Number.isFinite(km) && km > 0 ? Number(km.toFixed(1)) : null,
         odometer: Number.isFinite(odo) && odo > 0 ? Number(odo.toFixed(1)) : null,
-        fuel_type: appState.fuelType
+        fuel_type: appState.otherBrand ? "other" : appState.fuelType
       };
       const { error } = await sb.from(FILLUP_TABLE).insert(row);
       if (error) {
@@ -5153,6 +5219,14 @@
         flashButton(els.platinumBtn);
         setFuelType("platinum");
       });
+
+      els.otherBrandToggle.addEventListener("click", () => {
+        flashButton(els.otherBrandToggle);
+        setOtherBrand(!appState.otherBrand);
+      });
+      if (els.otherPrice) {
+        els.otherPrice.addEventListener("input", () => calculate(false));
+      }
 
       els.applyManualBtn.addEventListener("click", () => {
         flashButton(els.applyManualBtn);
@@ -5868,6 +5942,7 @@
     function fuelLabel(f) {
       if (f === "platinum") return "白金";
       if (f === "gold") return "黃金";
+      if (f === "other") return "其他";
       return "";
     }
 
@@ -7149,6 +7224,7 @@
       } else {
         setFuelType("gold");
       }
+      setOtherBrand(appState.otherBrand);
 
       if (appState.prices.gold != null) {
         els.manualGoldPrice.value = Number(appState.prices.gold).toFixed(2);
