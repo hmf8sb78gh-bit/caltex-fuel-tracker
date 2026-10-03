@@ -3366,10 +3366,10 @@
 
       const safeLitres = Math.max(0, litres);
 
-      // ① 牌價總額 gross = 牌價 × 實際入油量
-      const listTotal = pumpPrice * safeLitres;
+      // ① 牌價總額 gross = 牌價 × 入油量，並以仙位四捨五入（同現實收銀計價一致）
+      const listTotal = Number((pumpPrice * safeLitres).toFixed(2));
 
-      // ② 油券：每滿 HK$350 一張、可疊加，張數 = floor(gross / 350)
+      // ② 油券：每滿 HK$350 一張、可疊加，張數 = floor(四捨五入後嘅 gross / 350)
       const voucherSheets =
         voucherPerSheet > 0 && listTotal > 0
           ? Math.floor(listTotal / VOUCHER_STEP)
