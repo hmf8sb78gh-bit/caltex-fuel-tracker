@@ -4947,10 +4947,20 @@
       }
 
       const nxt = nextYm(ym); // 下個月一號，用 lt 就唔會撞「YYYY-MM-31」無效日期
+
+      // 先搵上個月1號之前最後一筆，做里程邊界（計月內第一筆嘅跨月距離）
+      const { data: beforeRows } = await sb
+        .from(FILLUP_TABLE)
+        .select("fill_date, odometer, trip_km")
+        .eq("user_id", appState.user.id)
+        .lt("fill_date", pYm + "-01")
+        .order("fill_date", { ascending: false })
+        .limit(1);
+
       // 一次過撈上個月＋本月（由上個月一號到下個月一號）
       const { data, error } = await sb
         .from(FILLUP_TABLE)
-        .select("paid_amount, trip_km, fill_date")
+        .select("paid_amount, trip_km, odometer, fill_date")
         .eq("user_id", appState.user.id)
         .gte("fill_date", pYm + "-01")
         .lt("fill_date", nxt + "-01");
@@ -4961,12 +4971,35 @@
         fillupPrevTotal = localYmTotal(pYm);
         fillupPrevKm = localYmKm(pYm);
       } else {
-        const curRows = (data || []).filter((r) => String(r.fill_date).slice(0, 7) === ym);
-        const prevRows = (data || []).filter((r) => String(r.fill_date).slice(0, 7) === pYm);
-        fillupMonthTotal = curRows.reduce((s, r) => s + (Number(r.paid_amount) || 0), 0);
-        fillupMonthKm = curRows.reduce((s, r) => s + (Number(r.trip_km) || 0), 0);
-        fillupPrevTotal = prevRows.reduce((s, r) => s + (Number(r.paid_amount) || 0), 0);
-        fillupPrevKm = prevRows.reduce((s, r) => s + (Number(r.trip_km) || 0), 0);
+        const rangeRows = (data || []).slice().sort((a, b) =>
+          String(a.fill_date).localeCompare(String(b.fill_date)));
+        // 金額：照加
+        fillupMonthTotal = rangeRows
+          .filter((r) => String(r.fill_date).slice(0, 7) === ym)
+          .reduce((s, r) => s + (Number(r.paid_amount) || 0), 0);
+        fillupPrevTotal = rangeRows
+          .filter((r) => String(r.fill_date).slice(0, 7) === pYm)
+          .reduce((s, r) => s + (Number(r.paid_amount) || 0), 0);
+        // 里程：優先用前後總里程差重算（避免舊錯誤 trip_km 記成總里程）；
+        // 冇總里程先用 trip_km；冇任何前筆（全帳號第一筆）就視做基準、唔計
+        let prevOdo = beforeRows && beforeRows[0] ? Number(beforeRows[0].odometer) : NaN;
+        const kmBuckets = {};
+        kmBuckets[ym] = 0;
+        kmBuckets[pYm] = 0;
+        rangeRows.forEach((r) => {
+          const o = Number(r.odometer);
+          let d = 0;
+          if (Number.isFinite(o) && Number.isFinite(prevOdo) && o >= prevOdo) {
+            d = o - prevOdo;
+          } else if (Number.isFinite(prevOdo)) {
+            d = Number(r.trip_km) || 0;
+          }
+          const bk = String(r.fill_date).slice(0, 7);
+          if (kmBuckets[bk] != null) kmBuckets[bk] += d;
+          if (Number.isFinite(o)) prevOdo = o;
+        });
+        fillupMonthKm = kmBuckets[ym];
+        fillupPrevKm = kmBuckets[pYm];
       }
       updateMonthTotalLine();
     }
