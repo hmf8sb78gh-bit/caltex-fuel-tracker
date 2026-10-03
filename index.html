@@ -3566,7 +3566,9 @@
     function getIntervalView(values) {
       const chk = !!(els.fullTankChk && els.fullTankChk.checked);
       const acc = appState.fullInterval;
-      const curOdo = numberValue(els.currentOdometer, NaN);
+      // 今次欄空（Number("")=0）要當未輸入，否則儲存後會被誤判做里程 0
+      const curRaw = els.currentOdometer && els.currentOdometer.value.trim();
+      const curOdo = curRaw ? numberValue(els.currentOdometer, NaN) : NaN;
       const curLitres = Number.isFinite(values.litres) ? values.litres : 0;
       const curPaid = Number.isFinite(values.payable) ? values.payable : 0;
       const li = appState.lastInterval;
@@ -3576,11 +3578,17 @@
       let status = "";
       let cls = "";
 
-      const hasBase = acc.open && acc.startOdo != null &&
-        Number.isFinite(curOdo) && curOdo > acc.startOdo;
-      const totalL = acc.litres + curLitres;
-      const totalP = acc.paid + curPaid;
-      const totalD = hasBase ? curOdo - acc.startOdo : 0;
+      const hasBase0 = acc.open && acc.startOdo != null;
+      // 今次總里程欄空（剛儲存完）時，用「上次總里程」做當前位置，令儲存後油耗仍即時顯示
+      const currentInputActive = Number.isFinite(curOdo);
+      const effCur = currentInputActive ? curOdo : numberValue(els.lastOdometer, NaN);
+      // 今次欄嘅油量/金額已入咗 acc，淨輸入時唔好重複加
+      const effLitres = currentInputActive ? curLitres : 0;
+      const effPaid = currentInputActive ? curPaid : 0;
+      const hasBase = hasBase0 && Number.isFinite(effCur) && effCur > acc.startOdo;
+      const totalL = acc.litres + effLitres;
+      const totalP = acc.paid + effPaid;
+      const totalD = hasBase ? effCur - acc.startOdo : 0;
 
       if (chk && hasBase) {
         // 剔入滿：結算呢段並對齊重計
@@ -3642,7 +3650,7 @@
         els.intervalLine.className = "interval-line " + cls;
         els.intervalLine.style.display = status ? "" : "none";
       }
-      return { cost, kmL, estimate };
+      return { cost, kmL, estimate, totalD };
     }
 
     // 結果數字跳字（通用）：fmt 控制點樣顯示，prevMap 記每個元素舊值
@@ -3695,8 +3703,12 @@
       validateInputs();
 
       const values = calculateEffectiveValues();
-      const distanceKm = getDistanceKm();
+      const singleD = getDistanceKm();
       const intervalView = getIntervalView(values);
+      // 距離卡：優先今次行駛；剛儲存完（今次欄空）就顯示累計總里程
+      const distanceKm = Number.isFinite(singleD)
+        ? singleD
+        : (Number.isFinite(intervalView.totalD) && intervalView.totalD > 0 ? intervalView.totalD : NaN);
 
       updateTopFuelSummary(values);
       updateFuelCompare();
@@ -4409,6 +4421,14 @@
           : "--";
       }
       renderExpenseSummary();
+
+      // 主頁「現時總里程」行一齊更新（直接寫，唔經 updateConsumCurrentLine，避免遞迴）
+      const lineEl = document.getElementById("consumCurrentLine");
+      if (lineEl) {
+        lineEl.textContent = cur != null
+          ? "現時總里程：" + neat(Number(cur), 1) + " 公里"
+          : "現時總里程：未填（登入自動填入）";
+      }
     }
 
     // 舊帳號一次性修正：第一次入油唔計油耗，將基準重設為最新總里程，之前累積作廢
@@ -5574,8 +5594,12 @@
           ? "現時總里程：" + neat(Number(cur), 1) + " 公里"
           : "現時總里程：未填（登入自動填入）";
       }
-      // 帳號彈窗果個「現時總里程」一齊即時更新
-      if (els && els.cloudCurrentMileage) renderCloudRecord();
+      // 帳號彈窗果個「現時總里程」一齊即時更新（防遞迴）
+      if (els && els.cloudCurrentMileage && !updateConsumCurrentLine._busy) {
+        updateConsumCurrentLine._busy = true;
+        renderCloudRecord();
+        updateConsumCurrentLine._busy = false;
+      }
     }
 
     // 左邊：長期顯示「已儲存」嘅上次更換里程
