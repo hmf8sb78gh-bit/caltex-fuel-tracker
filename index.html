@@ -3621,6 +3621,7 @@
 
       // 未出到數就顯示返上一次結算值（如有）
       let estimate = false;
+      if (acc.estimated) estimate = true;
       if (!Number.isFinite(cost) && li) {
         cost = li.costPerKm;
         kmL = li.kmPerL;
@@ -4740,7 +4741,9 @@
           els.authPassword.value = "";
           renderAuth();
           closeAuthModal();
-          cloudLoadRecord();
+          cloudLoadRecord()
+            .then(() => cloudLoadPriceHist())
+            .then(() => reconcileFromCloud());
           cloudLoadConsum();
           cloudLoadMonthTotal();
           checkDuesReminders();
@@ -4766,7 +4769,9 @@
         if (data && data.session && data.session.user) {
           appState.user = data.session.user;
           renderAuth();
-          cloudLoadRecord();
+          cloudLoadRecord()
+            .then(() => cloudLoadPriceHist())
+            .then(() => reconcileFromCloud());
           cloudLoadConsum();
           cloudLoadMonthTotal();
           checkDuesReminders();
@@ -5002,6 +5007,128 @@
         fillupPrevKm = kmBuckets[pYm];
       }
       updateMonthTotalLine();
+    }
+
+    // 反推一筆入油嘅升數：用該日牌價＋而家折扣卡/油券設定，
+    // 解 payable = L·(P−D) − s·V·(1−D/P)，逐個券數 s 試
+    function estimateLitresForRow(date, paid, fuelType) {
+      const hist = loadPriceHist();
+      const dates = Object.keys(hist).filter((d) => d <= date).sort();
+      if (!dates.length) return NaN;
+      const h = hist[dates[dates.length - 1]];
+      const P = fuelType === "platinum" ? Number(h.p)
+        : fuelType === "gold" ? Number(h.g) : NaN;
+      if (!(P > 0)) return NaN;
+      let D = 0;
+      let V = 0;
+      if (fuelType === "gold" || fuelType === "platinum") {
+        D = getDiscountPerLitre();
+        V = getVoucherAmount();
+      }
+      const net = P - D;
+      if (!(net > 0)) return NaN;
+      for (let s = 0; s <= 12; s++) {
+        const L = (paid + s * V * (1 - D / P)) / net;
+        if (L <= 0) continue;
+        const gross = Number((P * L).toFixed(2));
+        const s2 = V > 0 ? Math.floor(gross / VOUCHER_STEP) : 0;
+        const voucher = s2 * V;
+        const billed = gross - voucher;
+        const calcPay = Math.max(0, billed - D * (billed / P));
+        if (s2 === s && Math.abs(calcPay - paid) < 0.05) return L;
+      }
+      return NaN;
+    }
+
+    // 登入後用後台全部入油記錄重建：總里程、基準、油耗累積
+    async function reconcileFromCloud() {
+      if (!sb || !appState.user) return;
+      const { data, error } = await sb
+        .from(FILLUP_TABLE)
+        .select("fill_date,paid_amount,trip_km,odometer,fuel_type")
+        .eq("user_id", appState.user.id)
+        .order("fill_date", { ascending: true });
+      if (error || !data || !data.length) return;
+
+      const rows = data;
+      // 行一次：基準＝第一筆；總里程、距離、油量逐筆累積（冇 odometer 就用 trip_km）
+      let startOdo = NaN;
+      let prevOdo = NaN;
+      let maxOdo = NaN;
+      let L = 0;
+      let P = 0;
+      let Dsum = 0;
+
+      rows.forEach((r, i) => {
+        const o = Number(r.odometer);
+        if (i === 0) {
+          if (Number.isFinite(o) && o > 0) {
+            startOdo = o;
+            prevOdo = o;
+            maxOdo = o;
+          }
+          return;
+        }
+        const paid = Number(r.paid_amount) || 0;
+        P += paid;
+        if (Number.isFinite(o) && o > 0) {
+          if (!(maxOdo > 0) || o > maxOdo) maxOdo = o;
+          if (Number.isFinite(prevOdo) && o >= prevOdo) Dsum += o - prevOdo;
+          else Dsum += Number(r.trip_km) || 0;
+          prevOdo = o;
+        } else {
+          Dsum += Number(r.trip_km) || 0;
+        }
+        const l = estimateLitresForRow(r.fill_date, paid, r.fuel_type);
+        if (Number.isFinite(l)) L += l;
+      });
+
+      // 全部冇 odometer 嘅舊帳號：以 0 做虛擬起點，距離用 trip_km 加總
+      if (!Number.isFinite(startOdo)) startOdo = 0;
+
+      const acc = appState.fullInterval || {};
+      const accHasData = !!(acc.open && acc.litres > 0);
+      let changed = false;
+
+      if (!accHasData && rows.length >= 2) {
+        appState.fullInterval = {
+          open: true,
+          startOdo: Number(startOdo.toFixed(1)),
+          litres: Number(L.toFixed(2)),
+          paid: Number(P.toFixed(2)),
+          baselineV2: true,
+          estimated: L > 0
+        };
+        changed = true;
+      } else if (!acc.open && Number.isFinite(startOdo)) {
+        appState.fullInterval = Object.assign({}, acc, {
+          open: true,
+          startOdo: Number(startOdo.toFixed(1)),
+          baselineV2: true
+        });
+        changed = true;
+      }
+
+      // 現時總里程：後台最大 odometer 若大過目前值，就更新（包括消耗品/維修在內比）
+      const otherMax = cloudCurrentMileage();
+      if (Number.isFinite(maxOdo) && maxOdo > 0 && (!(otherMax > 0) || maxOdo > otherMax)) {
+        els.lastOdometer.value = neat(maxOdo, 1);
+        changed = true;
+      }
+
+      if (!changed) return;
+
+      calculate(false);
+      saveState();
+      const acc2 = appState.fullInterval;
+      let lastCost = null;
+      if (acc2.open && acc2.paid > 0 && Dsum > 0) {
+        lastCost = acc2.paid / Dsum;
+      }
+      const syncOdo = Number(els.lastOdometer.value);
+      if (Number.isFinite(syncOdo) && syncOdo > 0) {
+        await cloudSaveRecord(syncOdo, lastCost);
+      }
     }
 
     async function saveCurrentOdometerAsLast() {
