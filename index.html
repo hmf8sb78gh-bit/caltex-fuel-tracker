@@ -5985,6 +5985,14 @@
 
       saveConsumState();
 
+      // 儲存完清晒所有「更換時里程」同「使費」輸入欄，避免舊值留低被重複儲存
+      CONSUMABLES.forEach((item) => {
+        const input = document.querySelector('[data-input="' + item.id + '"]');
+        const cEl = document.querySelector('[data-cost="' + item.id + '"]');
+        if (input) input.value = "";
+        if (cEl) cEl.value = "";
+      });
+
       CONSUMABLES.forEach((it) => {
         renderConsumLast(it.id);
         updateConsumUsage(it.id);
