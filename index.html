@@ -5858,10 +5858,11 @@
           : '<input type="number" inputmode="decimal" step="0.1" data-input="' + item.id +
             '" placeholder="更換時里程" />';
 
-        const savedCost = consumState.cost && consumState.cost[item.id] != null ? consumState.cost[item.id] : "";
+        // 使費欄永遠空白起步（記低嘅數已入賬作歷史，唔回填輸入框，
+        // 否則下次儲存會將舊金額再記一次）
         const costTag = '<div class="cinput-label">使費 HK$（選填）</div>' +
           '<input type="number" inputmode="decimal" step="0.01" data-cost="' + item.id +
-          '" placeholder="例如 600" value="' + savedCost + '" />';
+          '" placeholder="例如 600" value="" />';
 
         row.innerHTML =
           '<div class="cleft">' +
