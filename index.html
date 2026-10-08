@@ -2344,6 +2344,26 @@
     .trend-month-nav select {flex:1;}
     .trend-table-summary {font-size:.85rem;cursor:pointer;padding:12px 0;}
     @media(max-width:480px){#expenseTrendModal {padding:8px;} .expense-trend-panel {padding:14px;border-radius:18px;} .trend-detail {padding:10px;} .expense-trend-panel .exp-grid {gap:8px;} .expense-trend-panel .exp-cell {padding:10px;} }
+
+    /* 四個記錄入口共用標題、次要按鈕及互動；保留走勢工具列嘅緊湊尺寸。 */
+    .page-head {gap:10px;}
+    .page-title {min-width:0;line-height:1.4;}
+    .back-btn,.consum-auth-btn {min-height:44px;padding:8px 12px;border-radius:12px;font-size:.9rem;line-height:1.3;cursor:pointer;transition:background .2s ease,transform .2s ease;}
+    .back-btn:active,.consum-auth-btn:active,.rule-close:active {transform:scale(.97);}
+    button:focus-visible,summary:focus-visible {outline:2px solid var(--orange);outline-offset:3px;}
+    button:disabled {cursor:not-allowed;opacity:.55;}
+    body.modal-active {overflow:hidden;}
+    .modal-overlay,.rule-overlay {overscroll-behavior:contain;}
+    .rule-overlay.show:not(.hidden) {animation:overlayFade .35s ease both;}
+    .rule-overlay.show:not(.hidden) .rule-card {animation:panelRise .35s cubic-bezier(.2,.85,.25,1) both;}
+    .rule-overlay.show.closing {animation:overlayFadeOut .22s ease both;}
+    .rule-overlay.show.closing .rule-card {animation:panelDrop .22s cubic-bezier(.4,0,.6,1) both;}
+    @media(max-width:640px){.expense-trend-panel select {font-size:max(16px,1em);}}
+    @media(max-width:380px){.page-head {gap:6px;}.back-btn,.consum-auth-btn {padding:8px;font-size:.8rem;}.page-title {font-size:1rem;}}
+    @media(prefers-reduced-motion:reduce){
+      *,*::before,*::after {animation:none!important;transition:none!important;scroll-behavior:auto!important;}
+      button:hover,button:active,.consum-entry:hover,.consum-entry:active,.consum-entry .ce-arrow {transform:none!important;}
+    }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
@@ -2767,7 +2787,7 @@
       <div class="page-head">
         <button class="back-btn" id="closeConsumBtn" type="button">‹ 返回</button>
         <h2 class="page-title">消耗品更換記錄</h2>
-        <button class="consum-auth-btn" id="consumAuthBtn" type="button">登入 / 註冊</button>
+        <button class="consum-auth-btn" id="consumAuthBtn" data-open-account type="button">登入 / 註冊</button>
       </div>
 
       <div class="card">
@@ -2786,7 +2806,7 @@
       <div class="page-head">
         <button class="back-btn" id="closeFillupsBtn" type="button">‹ 返回</button>
         <h2 class="page-title">入油記錄</h2>
-        <span class="consum-auth-btn" style="visibility:hidden">佔位</span>
+        <button class="consum-auth-btn" id="fillupsAuthBtn" data-open-account type="button">登入 / 註冊</button>
       </div>
 
       <div class="card">
@@ -2812,7 +2832,7 @@
       <div class="page-head">
         <button class="back-btn" id="closeRepairsBtn" type="button">‹ 返回</button>
         <h2 class="page-title">維修記錄</h2>
-        <span class="consum-auth-btn" style="visibility:hidden">佔位</span>
+        <button class="consum-auth-btn" id="repairsAuthBtn" data-open-account type="button">登入 / 註冊</button>
       </div>
 
       <div class="card">
@@ -2855,7 +2875,7 @@
       <div class="page-head">
         <button class="back-btn" id="closeDuesBtn" type="button">‹ 返回</button>
         <h2 class="page-title">到期提醒 / 固定開支</h2>
-        <span class="consum-auth-btn" style="visibility:hidden">佔位</span>
+        <button class="consum-auth-btn" id="duesAuthBtn" data-open-account type="button">登入 / 註冊</button>
       </div>
 
       <div class="card"><h3>用車開支趨勢</h3><p class="consum-tip">比較每月油費、維修、消耗品同每公里油費。</p><button type="button" class="btn blue trend-action" data-open-expense-trend>查看開支趨勢</button></div>
@@ -4157,6 +4177,7 @@
           ];
         }
         // 入場：線條由左至右描邊＋淡入，末端光點最後彈出
+        option.animation = !reduceMotion;
         option.animationDuration = 1100;
         option.animationDurationUpdate = 500;
         option.animationEasing = "cubicOut";
@@ -4273,6 +4294,7 @@
         if (monthChartInst) monthChartInst.dispose();
         monthChartInst = window.echarts.init(el);
         monthChartInst.setOption(Object.assign({
+          animation: !reduceMotion,
           animationDuration: 700,
           animationDurationUpdate: 450,
           animationEasing: "cubicOut",
@@ -4425,56 +4447,110 @@
         els.acctLabel.textContent = "已登入";
         els.authOpenBtn.classList.add("is-in");
         els.authOpenBtn.setAttribute("title", u.email || "已登入");
-        const cab = document.getElementById("consumAuthBtn");
-        if (cab) cab.textContent = "登出";
       } else {
         els.acctLabel.textContent = "登入 / 註冊";
         els.authOpenBtn.classList.remove("is-in");
         els.authOpenBtn.setAttribute("title", "登入 / 註冊新帳號");
-        const cab = document.getElementById("consumAuthBtn");
-        if (cab) cab.textContent = "登入 / 註冊";
       }
 
+      document.querySelectorAll('[data-open-account]').forEach((button) => {
+        button.textContent = u ? "帳號" : "登入 / 註冊";
+      });
       renderCloudRecord();
       updateEntryDot();
     }
 
     // ===== 彈窗／子頁過場動畫（開 0.35s，閂快少少 0.22s）=====
     const CLOSE_ANIM_MS = 220;
-    const reduceMotion = window.matchMedia &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const motionQuery = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)");
+    let reduceMotion = !!(motionQuery && motionQuery.matches);
+    if (motionQuery && motionQuery.addEventListener) motionQuery.addEventListener("change", (e) => {
+      reduceMotion = e.matches;
+      if (priceChartInst) priceChartInst.setOption({ animation: !reduceMotion });
+      if (monthChartInst) monthChartInst.setOption({ animation: !reduceMotion });
+    });
+    const modalClosings = new WeakMap();
+    const modalReturnFocus = new WeakMap();
+    const modalStack = [];
+    let pageCloseTimer = null;
+
+    function cancelModalClose(el) {
+      const pending = modalClosings.get(el);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      el.removeEventListener("animationend", pending.onEnd);
+      modalClosings.delete(el);
+    }
+
+    function activeModal() {
+      return [...modalStack].reverse().find((el) => !el.classList.contains("hidden") && !el.classList.contains("closing"));
+    }
+
+    function syncModalScroll() {
+      document.body.classList.toggle("modal-active", !!activeModal());
+    }
 
     function animOpen(el) {
       if (!el) return;
+      cancelModalClose(el);
+      if (!modalStack.includes(el)) {
+        const leavingParent = modalStack.find((node) => node.classList.contains("closing") && node.contains(document.activeElement));
+        modalReturnFocus.set(el, leavingParent ? modalReturnFocus.get(leavingParent) : document.activeElement);
+        modalStack.push(el);
+      } else {
+        modalStack.splice(modalStack.indexOf(el), 1);
+        modalStack.push(el);
+      }
       el.classList.remove("closing");
       el.classList.remove("hidden");
+      el.setAttribute("role", "dialog");
+      el.setAttribute("aria-modal", "true");
+      const heading = el.querySelector("h2,h3");
+      if (heading) el.setAttribute("aria-label", heading.textContent.trim());
+      syncModalScroll();
+      el.style.zIndex = String(100 + modalStack.length * 2);
+      const first = [...el.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),summary,[tabindex="0"]')].find((node) => node.getClientRects().length);
+      if (first) first.focus({ preventScroll: true });
     }
 
     function animClose(el) {
-      if (!el || el.classList.contains("hidden")) return;
-      if (reduceMotion) { el.classList.add("hidden"); return; }
-      let done = false;
+      if (!el || el.classList.contains("hidden") || modalClosings.has(el)) return;
+      const pending = {};
       const finish = () => {
-        if (done) return;
-        done = true;
+        if (modalClosings.get(el) !== pending) return;
+        cancelModalClose(el);
         el.classList.add("hidden");
         el.classList.remove("closing");
+        const index = modalStack.indexOf(el);
+        if (index >= 0) modalStack.splice(index, 1);
+        syncModalScroll();
+        const target = modalReturnFocus.get(el);
+        if (!activeModal() && target && target.isConnected && el.contains(document.activeElement)) target.focus({ preventScroll: true });
+        modalReturnFocus.delete(el);
       };
-      const onEnd = (e) => {
-        // 等外層 overlay 自己個淡出播完（內層 panel 動畫事件唔計）
-        if (e.target === el) { el.removeEventListener("animationend", onEnd); finish(); }
+      pending.onEnd = (e) => {
+        if (e.target === el) finish();
       };
-      el.addEventListener("animationend", onEnd);
+      modalClosings.set(el, pending);
+      if (reduceMotion) { finish(); return; }
+      el.addEventListener("animationend", pending.onEnd);
       el.classList.add("closing");
-      setTimeout(finish, CLOSE_ANIM_MS + 70); // 保險
+      pending.timer = setTimeout(finish, CLOSE_ANIM_MS + 70);
+    }
+
+    function cancelPageTransition() {
+      clearTimeout(pageCloseTimer);
+      pageCloseTimer = null;
+      document.body.classList.remove("page-leaving");
     }
 
     // 子頁閂走動畫：播 0.22s 滑走後先至真正轉走 body mode
     function pageOutThen(done) {
+      cancelPageTransition();
       if (reduceMotion) { done(); return; }
       document.body.classList.add("page-leaving");
-      setTimeout(() => {
-        document.body.classList.remove("page-leaving");
+      pageCloseTimer = setTimeout(() => {
+        cancelPageTransition();
         done();
       }, CLOSE_ANIM_MS);
     }
@@ -4483,7 +4559,7 @@
       renderAuth();
       animOpen(els.authModal);
       setTimeout(() => {
-        if (appState.user) return;
+        if (appState.user || els.authModal.classList.contains("hidden") || els.authModal.classList.contains("closing") || activeModal() !== els.authModal) return;
         els.authEmail.focus({ preventScroll: true });
       }, 60);
     }
@@ -4782,8 +4858,11 @@
       setWipeMsg("");
       try {
         if (syncInFlight) throw new Error("請等同步完成後再清除。");
-        localStorage.removeItem(SYNC_QUEUE_PREFIX + appState.user.id);
+        const uid = appState.user && appState.user.id;
+        if (!uid) throw new Error("請先登入。");
         await cloudWipeAll();
+        if (!appState.user || appState.user.id !== uid) throw new Error("帳號已變更，請重新載入。");
+        localStorage.removeItem(SYNC_QUEUE_PREFIX + uid);
         historyCache = [];
         // 雲端清完，本機都一併清走、重設畫面（維持登入狀態）
         clearLocalRecords();
@@ -5430,22 +5509,28 @@
       // 單條刪除：入油記錄／維修記錄（事件代理，動態生成都得）
       document.addEventListener("click", (e) => {
         const fuBtn = e.target.closest ? e.target.closest("[data-del-fillup]") : null;
-        if (fuBtn) { deleteFillup(fuBtn.getAttribute("data-del-fillup")); return; }
+        if (fuBtn) { runButtonTask(fuBtn, () => deleteFillup(fuBtn.getAttribute("data-del-fillup"))); return; }
         const rpBtn = e.target.closest ? e.target.closest("[data-del-repair]") : null;
-        if (rpBtn) { deleteRepair(rpBtn.getAttribute("data-del-repair")); }
+        if (rpBtn) { runButtonTask(rpBtn, () => deleteRepair(rpBtn.getAttribute("data-del-repair"))); }
       });
 
-      // Esc 關閉任何打開咗嘅彈窗
+      // 只處理最上層彈窗；所有入口共用 Esc、焦點循環。
       document.addEventListener("keydown", (e) => {
-        if (e.key !== "Escape") return;
-        [
-          ["authModal", closeAuthModal],
-          ["wipeModal", closeWipeModal]
-        ].forEach(([id, closer]) => {
-          const node = document.getElementById(id);
-          if (node && !node.classList.contains("hidden")) closer();
-        });
-      });
+        const modal = activeModal();
+        if (!modal) return;
+        if (e.key === "Escape") {
+          e.preventDefault(); e.stopImmediatePropagation();
+          const closers = { authModal: closeAuthModal, wipeModal: closeWipeModal, dueEditModal: closeDueEdit,
+            dueRemindModal: closeDuesRemind, expenseTrendModal: closeExpenseTrends, ruleOverlay: closeRuleModal };
+          if (closers[modal.id]) closers[modal.id]();
+        } else if (e.key === "Tab") {
+          const nodes = [...modal.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex="0"]')].filter((node) => node.getClientRects().length);
+          const first = nodes[0], last = nodes[nodes.length - 1];
+          if (first && ((e.shiftKey ? document.activeElement === first : document.activeElement === last) || !modal.contains(document.activeElement))) {
+            e.preventDefault(); (e.shiftKey ? last : first).focus();
+          }
+        }
+      }, true);
 
       els.goldBtn.addEventListener("click", () => {
         userFuelOverride = true;
@@ -5520,28 +5605,28 @@
 
       els.loginBtn.addEventListener("click", () => {
         flashButton(els.loginBtn);
-        handleLogin();
+        runAuthTask(els.loginBtn, handleLogin);
       });
 
       els.registerBtn.addEventListener("click", () => {
         flashButton(els.registerBtn);
-        handleRegister();
+        runAuthTask(els.registerBtn, handleRegister);
       });
 
       els.logoutBtn.addEventListener("click", () => {
         flashButton(els.logoutBtn);
-        handleLogout();
+        runAuthTask(els.logoutBtn, handleLogout);
       });
 
       // 帳號頁右下角：匯出 CSV
       if (els.exportCsvBtn) els.exportCsvBtn.addEventListener("click", () => {
         flashButton(els.exportCsvBtn);
-        exportCsv();
+        runButtonTask(els.exportCsvBtn, exportCsv);
       });
       const backupBtn = document.getElementById("backupBtn");
       if (backupBtn) backupBtn.addEventListener("click", () => {
         flashButton(backupBtn);
-        exportBackup();
+        runButtonTask(backupBtn, exportBackup);
       });
       const restoreBtn = document.getElementById("restoreBtn");
       const restoreFile = document.getElementById("restoreFile");
@@ -5594,7 +5679,7 @@
       if (closeDues) closeDues.addEventListener("click", closeDuesPage);
       document.getElementById("dueParkingList")?.addEventListener("click", (e) => {
         const del = e.target.closest("[data-del-due]");
-        if (del) deleteDue(del.getAttribute("data-del-due"));
+        if (del) runButtonTask(del, () => deleteDue(del.getAttribute("data-del-due")));
       });
 
       // 清除記錄：雙重確認
@@ -5630,7 +5715,7 @@
 
       // 密碼欄按 Enter 直接登入
       els.authPassword.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") handleLogin();
+        if (e.key === "Enter") { e.preventDefault(); runAuthTask(els.loginBtn, handleLogin); }
       });
 
       els.authOpenBtn.addEventListener("click", () => {
@@ -5647,12 +5732,6 @@
         if (e.target === els.authModal) closeAuthModal();
       });
 
-      // 按 Esc 關閉
-      document.addEventListener("keydown", (e) => {
-        if (e.key !== "Escape") return;
-        closeAuthModal();
-        closeDuesRemind();
-      });
     }
 
     // ===================== 消耗品記錄（第二頁） =====================
@@ -6093,6 +6172,13 @@
     }
 
     const busyButtons = new WeakSet();
+    let authTaskBusy = false;
+    async function runAuthTask(button, task) {
+      if (authTaskBusy) return;
+      authTaskBusy = true;
+      try { await runButtonTask(button, task); }
+      finally { authTaskBusy = false; }
+    }
     async function runButtonTask(button, task) {
       if (busyButtons.has(button)) return;
       busyButtons.add(button);
@@ -6145,6 +6231,7 @@
     }
 
     function setConsumMode(on) {
+      if (on) cancelPageTransition();
       document.body.classList.toggle("consum-mode", on);
       if (on) {
         setFillupsMode(false);
@@ -6182,6 +6269,7 @@
     let fuPickerBound = false;
 
     function setFillupsMode(on) {
+      if (on) cancelPageTransition();
       document.body.classList.toggle("fillups-mode", on);
       if (on) {
         setConsumMode(false);
@@ -6231,11 +6319,8 @@
       const requestUid = appState.user && appState.user.id;
 
       if (sb && appState.user) {
-        const { data, error } = await sb
-          .from(FILLUP_TABLE)
-          .select("id,fill_date,paid_amount,trip_km,odometer,fuel_type,litres,pump_price,card_discount,voucher_value,voucher_sheets,full_tank")
-          .eq("user_id", requestUid)
-          .order("fill_date", { ascending: false });
+        const { data, error } = await readAccountRows(FILLUP_TABLE,
+          "id,fill_date,paid_amount,trip_km,odometer,fuel_type,litres,pump_price,card_discount,voucher_value,voucher_sheets,full_tank", "fill_date", requestUid);
         if (!error) {
           rows = (data || []).map((r) => ({
             id: r.id,
@@ -6245,7 +6330,7 @@
             odo: Number(r.odometer) || 0,
             fuel: r.fuel_type, litres: r.litres, pumpPrice: r.pump_price, cardDiscount: r.card_discount, voucherValue: r.voucher_value, voucherSheets: r.voucher_sheets, fullTank: r.full_tank
           }));
-        }
+        } else { rows = fillupsListCache.slice(); }
       } else {
         rows = loadLocalFillups().map((r) => ({
           id: r.id,
@@ -6391,18 +6476,24 @@
     // #1 刪除單條入油記錄（雲端按 id；本機按 l_ 開頭 id）
     async function deleteFillup(id) {
       if (id == null || id === "") return;
+      const uid = appState.user && appState.user.id;
       if (pendingOperations().some((r) => r.id === id)) { alert("呢筆記錄待同步，請同步完成後再刪除。"); return; }
       if (!window.confirm("確定刪除呢條入油記錄？")) return;
-      await playRowOut("data-del-fillup", id);
       const isLocal = String(id).indexOf("l_") === 0;
-      if (!isLocal && sb && appState.user) {
-        const { error } = await sb.from(FILLUP_TABLE).delete().eq("id", id);
+      if (!isLocal) {
+        if (!sb || !uid) { alert("請先登入再刪除雲端記錄。"); return; }
+        const { error } = await sb.from(FILLUP_TABLE).delete().eq("id", id).eq("user_id", uid);
         if (error) { alert("刪除失敗：" + error.message); return; }
       } else {
         saveLocalFillups(loadLocalFillups().filter((r) => r.id !== id));
       }
+      if (uid !== (appState.user && appState.user.id)) return;
+      await playRowOut("data-del-fillup", id);
+      if (uid !== (appState.user && appState.user.id)) return;
       await loadFillupsForPage();
+      if (uid !== (appState.user && appState.user.id)) return;
       await cloudLoadMonthTotal();
+      if (uid !== (appState.user && appState.user.id)) return;
       await recomputeLastAfterFillupChange();
       renderExpenseSummary();
     }
@@ -6517,6 +6608,7 @@
     }
 
     function setRepairsMode(on) {
+      if (on) cancelPageTransition();
       document.body.classList.toggle("repairs-mode", on);
       if (on) {
         setConsumMode(false);
@@ -6551,11 +6643,8 @@
       let rows = [];
       const requestUid = appState.user && appState.user.id;
       if (sb && appState.user) {
-        const { data, error } = await sb
-          .from(REPAIR_TABLE)
-          .select("id,repair_date,item,mileage,cost")
-          .eq("user_id", requestUid)
-          .order("repair_date", { ascending: false });
+        const { data, error } = await readAccountRows(REPAIR_TABLE,
+          "id,repair_date,item,mileage,cost", "repair_date", requestUid);
         if (!error) {
           rows = (data || []).map((r) => ({
             id: r.id,
@@ -6666,17 +6755,22 @@
     // #1 刪除單條維修記錄
     async function deleteRepair(id) {
       if (id == null || id === "") return;
+      const uid = appState.user && appState.user.id;
       if (pendingOperations().some((r) => r.id === id)) { alert("記錄待同步，請同步完成後再刪除。"); return; }
       if (!window.confirm("確定刪除呢條維修記錄？")) return;
-      await playRowOut("data-del-repair", id);
       const isLocal = String(id).indexOf("l_") === 0;
-      if (!isLocal && sb && appState.user) {
-        const { error } = await sb.from(REPAIR_TABLE).delete().eq("id", id);
+      if (!isLocal) {
+        if (!sb || !uid) { alert("請先登入再刪除雲端記錄。"); return; }
+        const { error } = await sb.from(REPAIR_TABLE).delete().eq("id", id).eq("user_id", uid);
         if (error) { alert("刪除失敗：" + error.message); return; }
       } else {
         saveLocalRepairs(loadLocalRepairs().filter((r) => r.id !== id));
       }
+      if (uid !== (appState.user && appState.user.id)) return;
+      await playRowOut("data-del-repair", id);
+      if (uid !== (appState.user && appState.user.id)) return;
       await loadRepairs();
+      if (uid !== (appState.user && appState.user.id)) return;
       syncCloudCurrentMileage();
       renderExpenseSummary();
     }
@@ -6691,19 +6785,20 @@
     async function exportCsv() {
       let fills = [];
       let repairs = [];
+      const uid = appState.user && appState.user.id;
 
       if (sb && appState.user) {
         const [f, r] = await Promise.all([
-          sb.from(FILLUP_TABLE).select("fill_date,paid_amount,trip_km,fuel_type,litres,pump_price,card_discount,voucher_value,voucher_sheets,full_tank")
-            .eq("user_id", appState.user.id).order("fill_date", { ascending: false }),
-          sb.from(REPAIR_TABLE).select("repair_date,item,mileage")
-            .eq("user_id", appState.user.id).order("repair_date", { ascending: false })
+          readAccountRows(FILLUP_TABLE,"fill_date,paid_amount,trip_km,fuel_type,litres,pump_price,card_discount,voucher_value,voucher_sheets,full_tank","fill_date",uid),
+          readAccountRows(REPAIR_TABLE,"repair_date,item,mileage,cost","repair_date",uid)
         ]);
+        if (!appState.user || appState.user.id !== uid) throw new Error("帳號已變更，請重新匯出。");
+        if (f.error || r.error) throw new Error("讀取記錄失敗，未有匯出；請連線後重試。");
         fills = f.error ? loadLocalFillups() : (f.data || []).map((x) => ({
           date: x.fill_date, paid: Number(x.paid_amount) || 0, km: Number(x.trip_km) || 0, fuel: x.fuel_type, litres:x.litres, pumpPrice:x.pump_price, cardDiscount:x.card_discount, voucherValue:x.voucher_value, voucherSheets:x.voucher_sheets, fullTank:x.full_tank
         }));
         repairs = r.error ? loadLocalRepairs() : (r.data || []).map((x) => ({
-          date: x.repair_date, item: x.item || "", km: Number(x.mileage) || 0
+          date: x.repair_date, item: x.item || "", km: Number(x.mileage) || 0, cost: Number(x.cost) || 0
         }));
       } else {
         fills = loadLocalFillups();
@@ -6728,9 +6823,9 @@
       });
       lines.push("");
       lines.push("維修記錄");
-      lines.push(["年月", "項目", "里程"].map(csvCell).join(","));
+      lines.push(["年月", "項目", "里程", "使費"].map(csvCell).join(","));
       repairSorted.forEach((x, i) => {
-        lines.push([x.date, x.item, neat(Number(x.km) || 0, 1) + " km"].map(csvCell).join(","));
+        lines.push([x.date, x.item, neat(Number(x.km) || 0, 1) + " km", "HK$" + neat(Number(x.cost) || 0, 2)].map(csvCell).join(","));
         if (i < repairSorted.length - 1) lines.push("");
       });
       lines.push("");
@@ -6768,6 +6863,7 @@
     ];
 
     async function exportBackup() {
+      const uid = appState.user && appState.user.id;
       const payload = {
         app: "caltex-fuel-tracker",
         version: 1,
@@ -6785,8 +6881,12 @@
       if (sb && appState.user) {
         for (const [name, table] of BACKUP_TABLES) {
           try {
-            const { data, error } = await sb.from(table).select("*").eq("user_id", appState.user.id);
+            const dateColumns = {fillups:"fill_date",repairs:"repair_date",dues:"due_date",consumable_history:"replacement_date"};
+            const { data, error } = dateColumns[name]
+              ? await readAccountRows(table,"*",dateColumns[name],uid)
+              : await sb.from(table).select("*").eq("user_id",uid);
             if (error) throw error;
+            if (!appState.user || appState.user.id !== uid) throw new Error("帳號已變更");
             payload.cloud[name] = data || [];
           } catch (e) {
             alert("備份未完成：" + name + " 讀取失敗，請稍後重試。");
@@ -6934,6 +7034,7 @@
     }
 
     function setDuesMode(on) {
+      if (on) cancelPageTransition();
       document.body.classList.toggle("dues-mode", on);
       if (on) {
         setConsumMode(false);
@@ -6960,11 +7061,8 @@
       let rows = [];
       const requestUid = appState.user && appState.user.id;
       if (sb && appState.user) {
-        const { data, error } = await sb
-          .from(DUES_TABLE)
-          .select("id,kind,amount,due_date,note")
-          .eq("user_id", requestUid)
-          .order("due_date", { ascending: false });
+        const { data, error } = await readAccountRows(DUES_TABLE,
+          "id,kind,amount,due_date,note", "due_date", requestUid);
         if (!error) {
           rows = (data || []).map((r) => ({
             id: r.id, kind: r.kind, amount: Number(r.amount) || 0,
@@ -7224,15 +7322,18 @@
 
     async function deleteDue(id) {
       if (id == null || id === "") return;
+      const uid = appState.user && appState.user.id;
       if (pendingOperations().some((r) => r.id === id)) { alert("記錄待同步，請同步完成後再刪除。"); return; }
       if (!window.confirm("確定刪除呢筆記錄？")) return;
       const isLocal = String(id).indexOf("l_") === 0;
-      if (!isLocal && sb && appState.user) {
-        const { error } = await sb.from(DUES_TABLE).delete().eq("id", id);
+      if (!isLocal) {
+        if (!sb || !uid) { alert("請先登入再刪除雲端記錄。"); return; }
+        const { error } = await sb.from(DUES_TABLE).delete().eq("id", id).eq("user_id", uid);
         if (error) { alert("刪除失敗：" + error.message); return; }
       } else {
         saveLocalDues(loadLocalDues().filter((r) => r.id !== id));
       }
+      if (uid !== (appState.user && appState.user.id)) return;
       await loadDues();
     }
 
@@ -7246,8 +7347,7 @@
 
     async function fetchYearRows(table, cols, dateCol, yearStart) {
       if (sb && appState.user) {
-        const { data, error } = await sb.from(table).select(cols)
-          .eq("user_id", appState.user.id).gte(dateCol, yearStart);
+        const { data, error } = await readAccountRows(table, cols, dateCol, appState.user.id, yearStart);
         if (!error) return (data || []).map((r) => r);
       }
       return null; // 攞唔到就用本機 cache
@@ -7349,6 +7449,7 @@
     }
 
     function syncViewFromHash() {
+      cancelPageTransition();
       const h = location.hash;
       if (h === "#consumables") {
         // 消耗品頁：已登入→入；登入狀態未確認→先留低；確認冇登入→彈主頁
@@ -7446,10 +7547,11 @@
         )
         .join("");
       document.getElementById("ruleOverlay").classList.add("show");
+      animOpen(document.getElementById("ruleOverlay"));
     }
 
     function closeRuleModal() {
-      document.getElementById("ruleOverlay").classList.remove("show");
+      animClose(document.getElementById("ruleOverlay"));
     }
 
     function initConsumables() {
@@ -7473,13 +7575,8 @@
         runButtonTask(e.currentTarget, saveConsumables);
       });
 
-      // 消耗品頁右上角：已登入就直接登出，未登入就開登入彈窗
-      document.getElementById("consumAuthBtn").addEventListener("click", () => {
-        if (appState.user) {
-          handleLogout();
-        } else {
-          openAuthModal();
-        }
+      document.querySelectorAll('[data-open-account]').forEach((button) => {
+        button.addEventListener("click", () => { flashButton(button); openAuthModal(); });
       });
 
       // 點迷你「?」開該項變色規則（事件委派，重新 render 都有效）
@@ -7494,9 +7591,6 @@
       document.getElementById("ruleCloseBtn").addEventListener("click", closeRuleModal);
       document.getElementById("ruleOverlay").addEventListener("click", (e) => {
         if (e.target.id === "ruleOverlay") closeRuleModal();
-      });
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") closeRuleModal();
       });
 
       window.addEventListener("hashchange", syncViewFromHash);
@@ -7595,8 +7689,8 @@
     async function loadConsumHistory() {
       if (!sb || !appState.user) return;
       const uid = appState.user.id;
-      const { data, error } = await sb.from(HISTORY_TABLE).select("id,item_id,replacement_date,mileage,cost,legacy")
-        .eq("user_id", uid).order("replacement_date", { ascending: false });
+      const { data, error } = await readAccountRows(HISTORY_TABLE,
+        "id,item_id,replacement_date,mileage,cost,legacy", "replacement_date", uid);
       if (!appState.user || appState.user.id !== uid) return;
       if (!error) historyCache = data || [];
       renderConsumHistory();
@@ -7666,14 +7760,24 @@
       consumables.filter((r)=>String(r.replacement_date)<=now).forEach((r) => { const b=buckets.get(String(r.replacement_date).slice(0,7));if(b){b.consumable+=Number(r.cost)||0;b.entries++;b.estimated ||= !!r.legacy;b.pending ||= !!r.pending;b.records.push(Object.assign({},r,{category:"consumable",date:r.replacement_date,cost:Number(r.cost)||0}));} });
       return [...buckets.values()].map((b) => Object.assign(b,{total:b.fuel+b.repair+b.consumable,costPerKm:b.km>0?b.matchedFuel/b.km:null}));
     }
-    async function fetchTrendRows(table, columns, dateColumn, start, uid) {
+    async function readAccountRows(table, columns, dateColumn, uid, start = null) {
       const rows=[];
-      for (let offset=0;;offset+=500) {
-        const {data,error}=await sb.from(table).select(columns).eq("user_id",uid).gte(dateColumn,start)
-          .order(dateColumn,{ascending:true}).order("id",{ascending:true}).range(offset,offset+499);
-        if(error) throw error;
-        rows.push(...(data||[])); if(!data || data.length<500) return rows;
+      try {
+        for (let offset=0;;offset+=500) {
+          let query=sb.from(table).select(columns).eq("user_id",uid);
+          if(start) query=query.gte(dateColumn,start);
+          const {data,error}=await query.order(dateColumn,{ascending:true}).order("id",{ascending:true}).range(offset,offset+499);
+          if(error) throw error;
+          rows.push(...(data||[])); if(!data || data.length<500) return {data:rows,error:null};
+        }
+      } catch(error) {
+        return {data:null,error};
       }
+    }
+    async function fetchTrendRows(table, columns, dateColumn, start, uid) {
+      const {data,error}=await readAccountRows(table,columns,dateColumn,uid,start);
+      if(error) throw error;
+      return data;
     }
     async function loadExpenseTrends() {
       if(!appState.user){openAuthModal();return;}
