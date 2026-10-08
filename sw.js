@@ -1,6 +1,6 @@
 // PWA service worker
 // 策略：HTML 同油價 JSON 用 network-first（保持最新）；圖示/manifest 用 cache-first；離線時回落快取。
-const CACHE = "caltex-fuel-v1";
+const CACHE = "caltex-fuel-v2";
 const SHELL = [
   "./index.html",
   "./manifest.webmanifest",
@@ -18,7 +18,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith("caltex-fuel-") && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
