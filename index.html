@@ -4499,7 +4499,7 @@
         // 舊帳號一次性修正：第一次入油唔計油耗，基準重設做最新里程
         const cloudInterval = data.full_interval && typeof data.full_interval === "object"
           ? data.full_interval : null;
-        if (!cloudInterval || !cloudInterval.baselineV2) {
+        if ((!cloudInterval || !cloudInterval.baselineV2) && !pendingOperations().some((op) => op.kind === "profile" || op.kind === "fillup")) {
           const latestOdo = Number(data.last_odometer);
           const changed = migrateBaselineOnce(Number.isFinite(latestOdo) ? latestOdo : NaN);
           if (changed) {
@@ -4522,44 +4522,13 @@
 
     // lastCostPerKm：上次每公里油費（HK$/km），沿用 DB 欄位 last_consumption 儲存
     async function cloudSaveRecord(lastOdometer, lastCostPerKm) {
-      if (!sb || !appState.user) return;
-      setSyncLine("正在同步到你嘅帳號…");
-
-      // 現時總里程（雲端版）＝上次入油總里數＋消耗品輸入取最大，排除「今次入油總里程」
-      const curMileage = cloudCurrentMileage();
-      const baseRow = {
-        user_id: appState.user.id,
-        last_odometer: Number(lastOdometer),
-        current_mileage: curMileage != null ? Number(curMileage) : null,
-        last_consumption: lastCostPerKm == null ? null : Number(lastCostPerKm),
-        fuel_type: appState.fuelType,
-        updated_at: new Date().toISOString()
-      };
-      // 滿缸法累積進度（要喺 fuel_records 加 full_interval / last_interval 兩個 jsonb 欄）
-      const row = Object.assign({}, baseRow, {
-        full_interval: appState.fullInterval,
-        last_interval: appState.lastInterval
-      });
-
-      let { error } = await sb
-        .from(CLOUD_TABLE)
-        .upsert(row, { onConflict: "user_id" });
-
-      // 若未跑 SQL 加欄位，降級用基本欄位再試，唔阻住正常儲存
-      if (error && /full_interval|last_interval|column/i.test(error.message)) {
-        const retry = await sb.from(CLOUD_TABLE).upsert(baseRow, { onConflict: "user_id" });
-        error = retry.error;
-      }
-
-      if (error) {
-        setSyncLine("同步失敗：" + error.message);
-        return false;
-      }
-
-      appState.cloudRecord = row;
+      if (!sb || !appState.user) return false;
+      const profile = profileSnapshot(lastOdometer, lastCostPerKm);
+      const ok = await saveQueued("profile", { profile });
+      appState.cloudRecord = Object.assign({}, appState.cloudRecord || {}, profile);
       renderCloudRecord();
-      setSyncLine("已同步到你嘅帳號 ✓（" + nowText() + "）");
-      return true;
+      setSyncLine(ok ? "已同步到你嘅帳號 ✓" : "已儲存 · 待同步，連線後自動補傳。");
+      return ok;
     }
 
     // 入油里程一變就 debounce 上雲（等 800ms 唔好逐個字寫）
@@ -4632,6 +4601,7 @@
     function clearLocalRecords() {
       clearTimeout(odoSyncTimer);
       fillupsListCache = [];
+      historyCache = [];
       consumState.km = {};
       consumState.cost = {};
       consumState.costYm = {};
@@ -4708,6 +4678,7 @@
       const tasks = [
         sb.from(CLOUD_TABLE).delete().eq("user_id", uid),
         sb.from(CONSUM_TABLE).delete().eq("user_id", uid),
+        sb.from(HISTORY_TABLE).delete().eq("user_id", uid),
         sb.from(FILLUP_TABLE).delete().eq("user_id", uid),
         sb.from(REPAIR_TABLE).delete().eq("user_id", uid),
         sb.from(DUES_TABLE).delete().eq("user_id", uid)
@@ -4725,7 +4696,10 @@
       btn.textContent = "清除中…";
       setWipeMsg("");
       try {
+        if (syncInFlight) throw new Error("請等同步完成後再清除。");
+        localStorage.removeItem(SYNC_QUEUE_PREFIX + appState.user.id);
         await cloudWipeAll();
+        historyCache = [];
         // 雲端清完，本機都一併清走、重設畫面（維持登入狀態）
         clearLocalRecords();
         appState.cloudRecord = null;
@@ -4743,71 +4717,30 @@
     }
 
     function initAuth() {
-      if (!sb) {
-        setAuthMsg("未能載入帳號系統（網絡問題或 CDN 被封鎖）。可以照常用，只係記錄淨係存喺呢部機。", "error");
-        appState.authReady = true;
-        syncViewFromHash();
-        return;
+      if (!sb) { appState.authReady = true; renderPendingStatus(); return; }
+      let loadedUid = null;
+      async function loadAccount(uid) {
+        await Promise.all([cloudLoadRecord(), cloudLoadConsum(), cloudLoadPriceHist(), loadRepairs(), loadDues(), loadConsumHistory(), loadFillupsForPage()]);
+        if (!appState.user || appState.user.id !== uid) return;
+        applyPendingState();
+        await reconcileFromCloud();
+        await flushPending();
+        await cloudLoadMonthTotal();
+        checkDuesReminders();
       }
-
-      // 訂閱登入狀態：初始化、登入、登出都會觸發
       sb.auth.onAuthStateChange((event, session) => {
-        // Token 刷新唔好再次載入／重建，避免覆蓋正在輸入嘅狀態。
-        if (event === "TOKEN_REFRESHED" && session && appState.user &&
-            session.user.id === appState.user.id) {
-          appState.user = session.user;
-          return;
-        }
-        if (session && session.user) {
-          if (!appState.user || appState.user.id !== session.user.id) clearLocalRecords();
-          appState.user = session.user;
-          els.authPassword.value = "";
-          renderAuth();
-          closeAuthModal();
-          cloudLoadRecord()
-            .then(() => cloudLoadPriceHist())
-            .then(() => reconcileFromCloud());
-          cloudLoadConsum();
-          cloudLoadMonthTotal();
-          checkDuesReminders();
+        const user = session && session.user;
+        if (user) {
+          appState.user = user;
+          if (loadedUid !== user.id) {
+            clearLocalRecords(); loadedUid = user.id;
+            els.authPassword.value = ""; renderAuth(); closeAuthModal();
+            setTimeout(() => loadAccount(user.id).catch((e) => setSyncLine("讀取未完成，請重新整理：" + e.message)), 0);
+          }
         } else {
-          appState.user = null;
-          appState.cloudRecord = null;
-          clearLocalRecords();
-          const ymNow = hkYMD().slice(0, 7);
-          const ymPrev = prevYm(ymNow);
-          fillupMonthTotal = localYmTotal(ymNow);
-          fillupMonthKm = localYmKm(ymNow);
-          fillupPrevTotal = localYmTotal(ymPrev);
-          fillupPrevKm = localYmKm(ymPrev);
-          updateMonthTotalLine();
-          renderAuth();
+          loadedUid = null; appState.user = null; clearLocalRecords(); historyCache = []; renderAuth();
         }
-        // 登入狀態確認完，重新判斷消耗品頁（解決 refresh 被彈走）
-        appState.authReady = true;
-        syncViewFromHash();
-      });
-
-      // 主動拎一次現有 session（雙保險，加快 refresh 還原）
-      sb.auth.getSession().then(({ data }) => {
-        if (data && data.session && data.session.user) {
-          appState.user = data.session.user;
-          renderAuth();
-          cloudLoadRecord()
-            .then(() => cloudLoadPriceHist())
-            .then(() => reconcileFromCloud());
-          cloudLoadConsum();
-          cloudLoadMonthTotal();
-          checkDuesReminders();
-        } else {
-          // 冇 session（每次重新打開都要登入）：順手清走上次留低嘅本機記錄
-          appState.user = null;
-          appState.cloudRecord = null;
-          clearLocalRecords();
-          renderAuth();
-        }
-        appState.authReady = true;
-        syncViewFromHash();
+        appState.authReady = true; syncViewFromHash(); renderPendingStatus();
       });
     }
 
@@ -4990,7 +4923,7 @@
       // 一次過撈上個月＋本月（由上個月一號到下個月一號）
       const { data, error } = await sb
         .from(FILLUP_TABLE)
-        .select("paid_amount, trip_km, odometer, fill_date")
+        .select("id,paid_amount,trip_km,odometer,fill_date,litres")
         .eq("user_id", appState.user.id)
         .gte("fill_date", pYm + "-01")
         .lt("fill_date", nxt + "-01");
@@ -5001,8 +4934,12 @@
         fillupPrevTotal = localYmTotal(pYm);
         fillupPrevKm = localYmKm(pYm);
       } else {
-        const rangeRows = (data || []).slice().sort((a, b) =>
-          String(a.fill_date).localeCompare(String(b.fill_date)));
+        const map = new Map((data || []).map((r) => [r.id, r]));
+        pendingOperations().filter((op) => op.kind === "fillup").forEach((op) => {
+          if (!map.has(op.id)) map.set(op.id, Object.assign({id:op.id}, op.payload.fillup));
+        });
+        const rangeRows = [...map.values()].filter((r) => r.fill_date >= pYm + "-01" && r.fill_date < nxt + "-01")
+          .sort((a,b) => String(a.fill_date).localeCompare(String(b.fill_date)) || Number(a.odometer)-Number(b.odometer));
         // 金額：照加
         fillupMonthTotal = rangeRows
           .filter((r) => String(r.fill_date).slice(0, 7) === ym)
@@ -5020,7 +4957,8 @@
         rangeRows.forEach((r) => {
           const o = r.odometer == null || r.odometer === "" ? NaN : Number(r.odometer);
           let d = 0;
-          if (Number.isFinite(o) && Number.isFinite(prevOdo) && o >= prevOdo) {
+          if (r.litres != null) { d = Number(r.trip_km) || 0; }
+          else if (Number.isFinite(o) && Number.isFinite(prevOdo) && o >= prevOdo) {
             d = o - prevOdo;
           } else if (Number.isFinite(prevOdo)) {
             d = Number(r.trip_km) || 0;
@@ -5069,9 +5007,10 @@
     // 登入後用後台全部入油記錄重建：總里程、基準、油耗累積
     async function reconcileFromCloud() {
       if (!sb || !appState.user) return;
+      if (pendingOperations().some((op) => op.kind === "profile" || op.kind === "fillup")) return;
       const { data, error } = await sb
         .from(FILLUP_TABLE)
-        .select("fill_date,paid_amount,trip_km,odometer,fuel_type")
+        .select("fill_date,paid_amount,trip_km,odometer,fuel_type,litres,full_tank")
         .eq("user_id", appState.user.id)
         .order("fill_date", { ascending: true });
       if (error || !data || !data.length) return;
@@ -5105,7 +5044,7 @@
         } else {
           Dsum += Number(r.trip_km) || 0;
         }
-        const l = estimateLitresForRow(r.fill_date, paid, r.fuel_type);
+        const l = r.litres != null ? Number(r.litres) : estimateLitresForRow(r.fill_date, paid, r.fuel_type);
         if (Number.isFinite(l)) L += l;
       });
 
@@ -5245,7 +5184,7 @@
         if (isDup && !window.confirm("今日已經儲存過一筆相同金額同里程嘅記錄，係咪要再儲存多次？")) {
           return;
         }
-        recordLocalFillup(paidNow, tripKmNow, current);
+        // 本筆完整資料會同區間狀態一併入待同步佇列。
         fillupMonthTotal += paidNow;
         fillupMonthKm += tripKmNow;
         updateMonthTotalLine();
@@ -5328,11 +5267,15 @@
           saveBtn.textContent = "儲存中…";
         }
         try {
-          const ok = await cloudSaveRecord(current, lastCostPerKm);
-          const fillupOk = !hasFillup || await cloudAddFillup(paidNow, tripKmNow, current);
-          const allOk = ok && fillupOk;
+          const fillup = { fill_date: hkYMD(), paid_amount: paidNow, trip_km: tripKmNow,
+            odometer: current, fuel_type: appState.otherBrand ? "other" : appState.fuelType,
+            litres: valuesNow.litres, pump_price: valuesNow.pumpPrice,
+            card_discount: appState.otherBrand ? 0 : valuesNow.cardDiscount,
+            voucher_value: appState.otherBrand ? 0 : valuesNow.voucherPerSheet,
+            voucher_sheets: appState.otherBrand ? 0 : valuesNow.voucherSheets, full_tank: isFull };
+          const allOk = await saveQueued("fillup", { profile: profileSnapshot(current, lastCostPerKm), fillup });
           showStatus((intervalMsg ? intervalMsg + " " : "") +
-            (allOk ? "已同步到你嘅帳號 ✓" : "（雲端未完整同步，本機已存；請勿重複儲存，先檢查入油記錄）"));
+            (allOk ? "已同步到你嘅帳號 ✓" : "已儲存 · 待同步，連線後會自動補傳"));
           if (allOk) showToast("已儲存並同步雲端 ✓");
         } catch (e) {
           showStatus((intervalMsg ? intervalMsg + " " : "") +
@@ -6006,6 +5949,17 @@
           return;
         }
       }
+      const history = [];
+      for (const item of CONSUMABLES) {
+        const input = document.querySelector('[data-input="' + item.id + '"]');
+        const cost = document.querySelector('[data-cost="' + item.id + '"]');
+        const v = input ? input.value.trim() : "";
+        const c = cost ? cost.value.trim() : "";
+        if (v || c) history.push({ id: crypto.randomUUID(), item_id: item.id,
+          replacement_date: item.dateBased && v ? v : hkYMD(),
+          mileage: !item.dateBased && v ? Number(v) : null, cost: c ? Number(Number(c).toFixed(2)) : 0 });
+      }
+      if (!history.length) { setConsumSync("請填至少一項更換里程、日期或使費。"); return; }
       // 由已有記錄開始（保留冇輸入嘅舊記錄），淨係覆蓋「有輸入」嘅項目
       const next = Object.assign({}, consumState.km || {});
 
@@ -6032,6 +5986,7 @@
       consumState.cost = nextCost;
       consumState.costYm = nextCostYm;
 
+      enqueueOperation(makeOperation("consumables", { snapshot: consumState, history }));
       saveConsumState();
 
       // 儲存完清晒所有「更換時里程」同「使費」輸入欄，避免舊值留低被重複儲存
@@ -6048,7 +6003,9 @@
       });
 
       if (sb && appState.user) {
-        await cloudSaveConsum();
+        const ok = await flushPending();
+        setConsumSync(ok ? "更換記錄已儲存並同步 ✓" : "已儲存 · 待同步，連線後自動補傳。");
+        renderConsumHistory();
       } else {
         setConsumSync("已儲存喺呢部機 ✓（登入帳號可同步到雲端）");
         showToast("已儲存喺呢部機");
@@ -6100,24 +6057,12 @@
       setConsumSync("已同步到你嘅帳號 ✓（換機登入都見到）");
     }
 
-    async function cloudSaveConsum() {
-      if (!sb || !appState.user) return;
-      setConsumSync("同步中…");
-
-      const row = {
-        user_id: appState.user.id,
-        km: consumState.km,
-        cost: consumState.cost || {},
-        costYm: consumState.costYm || {},
-        updated_at: new Date().toISOString()
-      };
-
-      const { error } = await sb
-        .from(CONSUM_TABLE)
-        .upsert(row, { onConflict: "user_id" });
-
-      setConsumSync(error ? "同步失敗：" + error.message : "已同步到你嘅帳號 ✓");
-      if (!error) showToast("消耗品記錄已儲存並同步 ✓");
+    async function cloudSaveConsum(history = []) {
+      if (!sb || !appState.user) return false;
+      const ok = await saveQueued("consumables", { snapshot: consumState, history });
+      setConsumSync(ok ? "更換記錄已儲存並同步 ✓" : "更換記錄已儲存 · 待同步，連線後自動補傳。");
+      renderConsumHistory();
+      return ok;
     }
 
     function setConsumMode(on) {
@@ -6127,6 +6072,7 @@
         setRepairsMode(false);
         setDuesMode(false);
         refreshAllConsumSince();
+        loadConsumHistory();
       }
       window.scrollTo(0, 0);
     }
@@ -6208,7 +6154,7 @@
       if (sb && appState.user) {
         const { data, error } = await sb
           .from(FILLUP_TABLE)
-          .select("id,fill_date,paid_amount,trip_km,odometer,fuel_type")
+          .select("id,fill_date,paid_amount,trip_km,odometer,fuel_type,litres,pump_price,card_discount,voucher_value,voucher_sheets,full_tank")
           .eq("user_id", requestUid)
           .order("fill_date", { ascending: false });
         if (!error) {
@@ -6218,7 +6164,7 @@
             paid: Number(r.paid_amount) || 0,
             km: Number(r.trip_km) || 0,
             odo: Number(r.odometer) || 0,
-            fuel: r.fuel_type
+            fuel: r.fuel_type, litres: r.litres, pumpPrice: r.pump_price, cardDiscount: r.card_discount, voucherValue: r.voucher_value, voucherSheets: r.voucher_sheets, fullTank: r.full_tank
           }));
         }
       } else {
@@ -6233,6 +6179,14 @@
       }
 
       if (requestUid !== (appState.user && appState.user.id)) return;
+      const seen = new Set(rows.map((r) => r.id));
+      pendingOperations().filter((op) => op.kind === "fillup" && !seen.has(op.id)).forEach((op) => {
+        const r = op.payload.fillup;
+        rows.push({ id: op.id, date: r.fill_date, paid: r.paid_amount, km: r.trip_km,
+          odo: r.odometer, fuel: r.fuel_type, litres: r.litres, pumpPrice: r.pump_price,
+          cardDiscount: r.card_discount, voucherValue: r.voucher_value, voucherSheets: r.voucher_sheets,
+          fullTank: r.full_tank, pending: true });
+      });
       fillupsListCache = rows;
       setupFuPicker();
       renderFillupsPage();
@@ -6305,6 +6259,12 @@
           if (r.km > 0) sub.push(neat(r.km, 1) + " km");
           const fl = fuelLabel(r.fuel);
           if (fl) sub.push(fl);
+          if (r.litres != null) sub.push(neat(Number(r.litres),2) + " 升");
+          if (r.pumpPrice != null) sub.push("牌價 HK$" + neat(Number(r.pumpPrice),2));
+          if (r.cardDiscount != null) sub.push("卡折 HK$" + neat(Number(r.cardDiscount),2) + "/升");
+          if (r.voucherValue > 0) sub.push("油券 HK$" + neat(Number(r.voucherValue),2) + " × " + r.voucherSheets);
+          if (r.fullTank != null) sub.push(r.fullTank ? "入滿" : "未入滿");
+          if (r.pending) sub.push("待同步");
           return (
             '<div class="fu-row row-in">' +
               '<div class="fu-left">' +
@@ -6344,6 +6304,7 @@
     // #1 刪除單條入油記錄（雲端按 id；本機按 l_ 開頭 id）
     async function deleteFillup(id) {
       if (id == null || id === "") return;
+      if (pendingOperations().some((r) => r.id === id)) { alert("呢筆記錄待同步，請同步完成後再刪除。"); return; }
       if (!window.confirm("確定刪除呢條入油記錄？")) return;
       await playRowOut("data-del-fillup", id);
       const isLocal = String(id).indexOf("l_") === 0;
@@ -6527,6 +6488,11 @@
         const seen = new Set(rows.map((r) => String(r.id)));
         rows = rows.concat(loadLocalRepairs().filter((r) => !seen.has(String(r.id))));
       }
+      const rowMap = new Map(rows.map((r) => [r.id, r]));
+      pendingOperations().filter((op) => op.kind === "repair").forEach((op) => {
+        const r = op.payload; if (!rowMap.has(op.id)) rowMap.set(op.id, { id: op.id, date: r.repair_date, item: r.item + "（待同步）", km: Number(r.mileage) || 0, cost: Number(r.cost) || 0 });
+      });
+      rows = [...rowMap.values()];
       repairsCache = rows;
       renderRepairs();
     }
@@ -6577,66 +6543,22 @@
     }
 
     async function addRepair() {
+      if (!appState.user) { openAuthModal(); return; }
       const itemEl = document.getElementById("repairItem");
       const kmEl = document.getElementById("repairMileage");
-      const yearSel = document.getElementById("repairYearSel");
-      const monthSel = document.getElementById("repairMonthSel");
-
-      const item = (itemEl.value || "").trim();
-      if (!item) {
-        setRepairSync("請先填寫「換咗咩 / 維修項目」。");
-        return;
+      const item = itemEl.value.trim();
+      const km = Number(kmEl.value), cost = Number(els.repairCost.value);
+      if (!item || !Number.isFinite(km) || km < 0 || !Number.isFinite(cost) || cost < 0) {
+        setRepairSync("請填維修項目；里程同使費必須係非負數。"); return;
       }
-      const km = Number(kmEl.value);
-      const cost = Number(els.repairCost.value);
-      if (!Number.isFinite(km) || km < 0 || !Number.isFinite(cost) || cost < 0) {
-        setRepairSync("里程同使費必須係有效嘅非負數。");
-        return;
-      }
-      // 年月揀選，統一儲做該月 1 號（配合雲端 date 欄位）
-      const ym = (yearSel.value || hkYMD().slice(0, 4)) + "-" +
-                 (monthSel.value || hkYMD().slice(5, 7));
-      const date = ym + "-01";
-      const record = {
-        id: "l_" + Date.now() + "_" + Math.floor(Math.random() * 1e4),
-        date,
-        item,
-        km: Number.isFinite(km) && km > 0 ? km : 0,
-        cost: Number.isFinite(cost) && cost > 0 ? cost : 0
-      };
-
-      if (sb && appState.user) {
-        setRepairSync("同步中…");
-        const { error } = await sb.from(REPAIR_TABLE).insert({
-          user_id: appState.user.id,
-          repair_date: record.date,
-          item: record.item,
-          mileage: record.km > 0 ? record.km : null,
-          cost: record.cost > 0 ? record.cost : null
-        });
-        if (error) {
-          // 雲端失敗（例如未建表）就暫存本機
-          const local = loadLocalRepairs();
-          local.push(record);
-          saveLocalRepairs(local);
-          setRepairSync("雲端同步失敗：" + error.message + "（已暫存本機）");
-        } else {
-          setRepairSync("已新增並同步到你嘅帳號 ✓");
-          showToast("維修記錄已儲存並同步 ✓");
-        }
-      } else {
-        const local = loadLocalRepairs();
-        local.push(record);
-        saveLocalRepairs(local);
-        showToast("已儲存喺呢部機");
-      }
-
-      itemEl.value = "";
-      kmEl.value = "";
-      if (els.repairCost) els.repairCost.value = "";
+      const date = document.getElementById("repairYearSel").value + "-" + document.getElementById("repairMonthSel").value + "-01";
+      const op = makeOperation("repair", { repair_date: date, item, mileage: km || null, cost: Number(cost.toFixed(2)) });
+      enqueueOperation(op);
+      itemEl.value = ""; kmEl.value = ""; els.repairCost.value = "";
       await loadRepairs();
-      syncCloudCurrentMileage();
-      renderExpenseSummary();
+      const ok = await flushPending();
+      setRepairSync(ok ? "已新增並同步 ✓" : "已儲存 · 待同步，連線後自動補傳。");
+      syncCloudCurrentMileage(); renderExpenseSummary();
     }
 
     // 維修里程都可能係全網最大 → 一併更新雲端 fuel_records.current_mileage
@@ -6657,6 +6579,7 @@
     // #1 刪除單條維修記錄
     async function deleteRepair(id) {
       if (id == null || id === "") return;
+      if (pendingOperations().some((r) => r.id === id)) { alert("記錄待同步，請同步完成後再刪除。"); return; }
       if (!window.confirm("確定刪除呢條維修記錄？")) return;
       await playRowOut("data-del-repair", id);
       const isLocal = String(id).indexOf("l_") === 0;
@@ -6684,13 +6607,13 @@
 
       if (sb && appState.user) {
         const [f, r] = await Promise.all([
-          sb.from(FILLUP_TABLE).select("fill_date,paid_amount,trip_km,fuel_type")
+          sb.from(FILLUP_TABLE).select("fill_date,paid_amount,trip_km,fuel_type,litres,pump_price,card_discount,voucher_value,voucher_sheets,full_tank")
             .eq("user_id", appState.user.id).order("fill_date", { ascending: false }),
           sb.from(REPAIR_TABLE).select("repair_date,item,mileage")
             .eq("user_id", appState.user.id).order("repair_date", { ascending: false })
         ]);
         fills = f.error ? loadLocalFillups() : (f.data || []).map((x) => ({
-          date: x.fill_date, paid: Number(x.paid_amount) || 0, km: Number(x.trip_km) || 0, fuel: x.fuel_type
+          date: x.fill_date, paid: Number(x.paid_amount) || 0, km: Number(x.trip_km) || 0, fuel: x.fuel_type, litres:x.litres, pumpPrice:x.pump_price, cardDiscount:x.card_discount, voucherValue:x.voucher_value, voucherSheets:x.voucher_sheets, fullTank:x.full_tank
         }));
         repairs = r.error ? loadLocalRepairs() : (r.data || []).map((x) => ({
           date: x.repair_date, item: x.item || "", km: Number(x.mileage) || 0
@@ -6705,13 +6628,14 @@
       const repairSorted = repairs.slice().sort((a, b) => (a.date < b.date ? 1 : -1));
 
       lines.push("入油記錄");
-      lines.push(["日期", "油品", "實付", "里程"].map(csvCell).join(","));
+      lines.push(["日期", "油品", "實付", "里程", "升數", "牌價", "卡折每升", "油券面值", "油券張數", "入滿"].map(csvCell).join(","));
       fillSorted.forEach((x, i) => {
         lines.push([
           x.date,
           fuelLabel(x.fuel),
           "HK$" + neat(Number(x.paid) || 0, 2),
-          neat(Number(x.km) || 0, 1) + " km"
+          neat(Number(x.km) || 0, 1) + " km",
+          x.litres, x.pumpPrice, x.cardDiscount, x.voucherValue, x.voucherSheets, x.fullTank == null ? "" : x.fullTank ? "是" : "否"
         ].map(csvCell).join(","));
         if (i < fillSorted.length - 1) lines.push(""); // 每條之間空一行
       });
@@ -6750,6 +6674,7 @@
     const BACKUP_TABLES = [
       ["profile", CLOUD_TABLE],
       ["consumables", CONSUM_TABLE],
+      ["consumable_history", HISTORY_TABLE],
       ["fillups", FILLUP_TABLE],
       ["repairs", REPAIR_TABLE],
       ["dues", DUES_TABLE]
@@ -6761,7 +6686,8 @@
         version: 1,
         exported_at: new Date().toISOString(),
         local: {},
-        cloud: {}
+        cloud: {},
+        pending: pendingOperations()
       };
       BACKUP_LOCAL_KEYS.forEach((k) => {
         try {
@@ -6852,6 +6778,13 @@
           } catch (e) {
             alert("雲端還原中途出錯：" + (e && e.message ? e.message : e) + "\n本機部分已還原，請重新整理再試。");
             return;
+          }
+        }
+        if (Array.isArray(payload.pending) && appState.user) {
+          for (const old of payload.pending) {
+            if (["profile","fillup","consumables","repair","parking","due"].includes(old.kind) && old.payload) {
+              enqueueOperation(makeOperation(old.kind, old.payload));
+            }
           }
         }
         showToast("還原完成，重新整理中…");
@@ -6961,6 +6894,13 @@
         const seen = new Set(rows.map((r) => String(r.id)));
         rows = rows.concat(loadLocalDues().filter((r) => !seen.has(String(r.id))));
       }
+      const rowMap = new Map(rows.map((r) => [r.id, r]));
+      pendingOperations().filter((op) => op.kind === "parking" || op.kind === "due").forEach((op) => {
+        const r = op.payload;
+        if (op.kind === "due") for (const [id, old] of rowMap) { if (old.kind === r.kind) rowMap.delete(id); }
+        if (!rowMap.has(op.id)) rowMap.set(op.id, { id: op.id, kind: op.kind === "parking" ? "parking" : r.kind, amount: r.amount, date: r.due_date, note: (r.note || "") + "（待同步）" });
+      });
+      rows = [...rowMap.values()];
       duesCache = rows;
       renderDues();
       renderExpenseSummary();
@@ -7112,32 +7052,15 @@
 
     // 停車場：一鍵記「今日已繳費」（雙重確定）
     async function payParking() {
-      const amtEl = document.getElementById("dueParkingAmt");
-      const amount = Number(amtEl.value);
-      if (!Number.isFinite(amount) || amount <= 0) { setDueSync("請先填月費金額。"); return; }
-      const date = hkYMD().slice(0, 10);
-      if (!window.confirm("確定已繳交停車場費 HK$" + neat(amount, 2) + "？\n會記低今日（" + date + "）。")) return;
-
-      const record = {
-        id: "l_" + Date.now() + "_" + Math.floor(Math.random() * 1e4),
-        kind: "parking", amount, date, note: ""
-      };
-      if (sb && appState.user) {
-        const { error } = await sb.from(DUES_TABLE).insert({
-          user_id: appState.user.id, kind: "parking",
-          amount: record.amount, due_date: record.date, note: ""
-        });
-        if (error) {
-          const local = loadLocalDues(); local.push(record); saveLocalDues(local);
-          setDueSync("雲端失敗：" + error.message + "（已暫存本機）");
-        } else { setDueSync("已記低繳費並同步 ✓"); showToast("停車場費已記錄 ✓"); }
-      } else {
-        const local = loadLocalDues(); local.push(record); saveLocalDues(local);
-        setDueSync("已記低本機（登入可同步雲端）");
-        showToast("已記錄喺呢部機");
-      }
-      amtEl.value = "";
-      await loadDues();
+      if (!appState.user) { openAuthModal(); return; }
+      const el = document.getElementById("dueParkingAmt");
+      const amount = Number(el.value), date = hkYMD();
+      if (!Number.isFinite(amount) || amount <= 0) { setDueSync("請填有效月費。"); return; }
+      if (!window.confirm("確定已繳交停車場費 HK$" + neat(amount,2) + "？")) return;
+      enqueueOperation(makeOperation("parking", { amount: Number(amount.toFixed(2)), due_date: date }));
+      el.value = ""; await loadDues();
+      const ok = await flushPending();
+      setDueSync(ok ? "停車場費已同步 ✓" : "已儲存 · 待同步，連線後自動補傳。");
     }
 
     // ===== 年費三項：彈窗修改，每項只留最新一條 =====
@@ -7205,31 +7128,16 @@
         }
       }
 
-      // 修改現有列；新值儲存失敗時，舊繳費資料仍然保留。
-      if (sb && appState.user) {
-        const uid = appState.user.id;
-        const existing = latestOf(kind);
-        const row = { user_id: uid, kind, amount, due_date: date, note };
-        const query = existing && !String(existing.id).startsWith("l_")
-          ? sb.from(DUES_TABLE).update(row).eq("id", existing.id).eq("user_id", uid)
-          : sb.from(DUES_TABLE).insert(row);
-        const { error } = await query;
-        if (error) { document.getElementById("dueEditMsg").textContent = "儲存失敗：" + error.message; return; }
-      } else {
-        const kept = loadLocalDues().filter((r) => r.kind !== kind);
-        kept.push({
-          id: "l_" + Date.now() + "_" + Math.floor(Math.random() * 1e4),
-          kind, amount, date, note
-        });
-        saveLocalDues(kept);
-      }
-      closeDueEdit();
-      await loadDues();
-      showToast("已儲存到期資料 ✓");
+      if (!appState.user) { openAuthModal(); return; }
+      enqueueOperation(makeOperation("due", { kind, amount: Number(amount.toFixed(2)), due_date: date, note }));
+      closeDueEdit(); await loadDues();
+      const ok = await flushPending();
+      showToast(ok ? "到期資料已同步 ✓" : "已儲存 · 待同步");
     }
 
     async function deleteDue(id) {
       if (id == null || id === "") return;
+      if (pendingOperations().some((r) => r.id === id)) { alert("記錄待同步，請同步完成後再刪除。"); return; }
       if (!window.confirm("確定刪除呢筆記錄？")) return;
       const isLocal = String(id).indexOf("l_") === 0;
       if (!isLocal && sb && appState.user) {
@@ -7274,9 +7182,13 @@
 
       // 油費（全年）
       let fuelRows = [];
-      const fuCloud = await fetchYearRows(FILLUP_TABLE, "paid_amount,fill_date", "fill_date", y + "-01-01");
+      const fuCloud = await fetchYearRows(FILLUP_TABLE, "id,paid_amount,fill_date", "fill_date", y + "-01-01");
       if (fuCloud) {
-        fuelRows = fuCloud.map((r) => ({ date: r.fill_date, paid: Number(r.paid_amount) || 0 }));
+        const map = new Map(fuCloud.map((r) => [r.id, { date: r.fill_date, paid: Number(r.paid_amount) || 0 }]));
+        pendingOperations().filter((op) => op.kind === "fillup").forEach((op) => {
+          if (!map.has(op.id)) map.set(op.id, { date: op.payload.fillup.fill_date, paid: op.payload.fillup.paid_amount });
+        });
+        fuelRows = [...map.values()];
       } else {
         fuelRows = (fillupsListCache || []).map((r) => ({ date: r.date, paid: Number(r.paid) || 0 }));
       }
@@ -7285,44 +7197,38 @@
 
       // 維修（全年，要 cost 欄）
       let repairRows = [];
-      const rpCloud = await fetchYearRows(REPAIR_TABLE, "cost,repair_date", "repair_date", y + "-01-01");
+      const rpCloud = await fetchYearRows(REPAIR_TABLE, "id,cost,repair_date", "repair_date", y + "-01-01");
       if (rpCloud) {
-        repairRows = rpCloud.map((r) => ({ date: r.repair_date, cost: Number(r.cost) || 0 }))
-          .concat(loadLocalRepairs().map((r) => ({ date: r.date, cost: Number(r.cost) || 0 })));
+        const map = new Map(rpCloud.map((r) => [r.id, { date: r.repair_date, cost: Number(r.cost) || 0 }]));
+        pendingOperations().filter((op) => op.kind === "repair").forEach((op) => {
+          if (!map.has(op.id)) map.set(op.id, { date: op.payload.repair_date, cost: op.payload.cost });
+        });
+        repairRows = [...map.values()].concat(loadLocalRepairs());
       } else {
         repairRows = (repairsCache || []).map((r) => ({ date: r.date, cost: Number(r.cost) || 0 }));
       }
       const repairM = sumIn(repairRows, "date", "cost", ym);
       const repairY = sumIn(repairRows, "date", "cost", y);
 
-      // 消耗品使費：優先直接由雲端攞（唔使靠有冇開過消耗品頁），攞唔到先用本機暫存
-      let cCost = (consumState && consumState.cost) || {};
-      let cYm = (consumState && consumState.costYm) || {};
-      if (sb && appState.user) {
-        const { data: cData } = await sb
-          .from(CONSUM_TABLE)
-          .select("cost,costYm")
-          .eq("user_id", appState.user.id)
-          .maybeSingle();
-        if (cData) {
-          if (cData.cost) cCost = cData.cost;
-          if (cData.costYm) cYm = cData.costYm;
-        }
-      }
-      let consM = 0, consY = 0;
-      Object.keys(cCost).forEach((id) => {
-        const c = Number(cCost[id]) || 0;
-        if (cYm[id] === ym) consM += c;
-        if (String(cYm[id] || "").slice(0, 4) === y) consY += c;
-      });
+      await loadConsumHistory();
+      const consumRows = consumHistoryRows();
+      const consM = sumIn(consumRows, "replacement_date", "cost", ym);
+      const consY = sumIn(consumRows, "replacement_date", "cost", y);
 
       // 固定開支：年費類每項只留最新一筆（可能跨年俾錢），所以要攞晒、唔好只篩今年
       let dues = duesCache || [];
       if (sb && appState.user) {
-        const { data } = await sb.from(DUES_TABLE).select("kind,amount,due_date")
+        const { data } = await sb.from(DUES_TABLE).select("id,kind,amount,due_date")
           .eq("user_id", appState.user.id);
-        if (data) dues = data.map((r) => ({ kind: r.kind, amount: Number(r.amount) || 0, date: r.due_date }))
-          .concat(loadLocalDues());
+        if (data) {
+          const map = new Map(data.map((r) => [r.id, { kind: r.kind, amount: Number(r.amount) || 0, date: r.due_date }]));
+          pendingOperations().filter((op) => op.kind === "parking" || op.kind === "due").forEach((op) => {
+            const p = op.payload;
+            if (op.kind === "due") for (const [id, row] of map) { if (row.kind === p.kind) map.delete(id); }
+            if (!map.has(op.id)) map.set(op.id, { kind: op.kind === "parking" ? "parking" : p.kind, amount: p.amount, date: p.due_date });
+          });
+          dues = [...map.values()].concat(loadLocalDues());
+        }
       }
       let parkingM = 0, parkingY = 0;
       // 年費：每項揀最新一筆（唔理邊年俾，代表而家生效緊嘅固定年費）
@@ -7510,6 +7416,127 @@
       window.addEventListener("popstate", syncViewFromHash);
       syncViewFromHash();
     }
+
+    const SYNC_QUEUE_PREFIX = "caltexPendingV2:";
+    const HISTORY_TABLE = "consumable_history";
+    let historyCache = [];
+    let syncInFlight = false;
+    let lastSyncError = "";
+    function pendingOperations(uid = appState.user && appState.user.id) {
+      if (!uid) return [];
+      try { const rows = JSON.parse(localStorage.getItem(SYNC_QUEUE_PREFIX + uid) || "[]"); return Array.isArray(rows) ? rows : []; }
+      catch (e) { throw new Error("待同步資料未能讀取，請勿清除瀏覽器資料。"); }
+    }
+    function writePending(uid, rows) {
+      // 唔吞儲存錯誤：本機存唔到就唔好假報已儲存。
+      localStorage.setItem(SYNC_QUEUE_PREFIX + uid, JSON.stringify(rows));
+      renderPendingStatus();
+    }
+    function makeOperation(kind, payload) {
+      if (!appState.user) throw new Error("請先登入帳號。");
+      return { id: crypto.randomUUID(), uid: appState.user.id, kind, payload: JSON.parse(JSON.stringify(payload)), created_at: new Date().toISOString() };
+    }
+    function enqueueOperation(operation) {
+      const rows = pendingOperations(operation.uid);
+      if (!rows.some((r) => r.id === operation.id)) rows.push(operation);
+      writePending(operation.uid, rows);
+    }
+    function profileSnapshot(odo, cost) {
+      return { last_odometer: odo, current_mileage: cloudCurrentMileage(), last_consumption: cost,
+        fuel_type: appState.otherBrand ? "other" : appState.fuelType,
+        full_interval: appState.fullInterval, last_interval: appState.lastInterval };
+    }
+    function renderPendingStatus() {
+      let box = document.getElementById("pendingSyncStatus");
+      if (!box) {
+        box = document.createElement("div"); box.id = "pendingSyncStatus"; box.className = "sync-line";
+        box.setAttribute("role", "status"); box.setAttribute("aria-live", "polite");
+        const anchor = document.getElementById("syncLine"); if (anchor) anchor.after(box);
+      }
+      const count = pendingOperations().length;
+      box.textContent = !appState.user ? "登入後會繼續補傳待同步記錄。" : count
+        ? "待同步 " + count + " 筆 · " + (syncInFlight ? "正在補傳…" : "已保存在此裝置，連線後自動補傳") + (lastSyncError ? "（" + lastSyncError + "）" : "")
+        : "所有已儲存記錄已同步 ✓";
+      let main = document.getElementById("pendingSyncMain");
+      if (!main) { main = document.createElement("div"); main.id = "pendingSyncMain"; main.className = "sync-line"; main.setAttribute("role","status");
+        const footer = document.getElementById("footerInfo"); if (footer) footer.before(main); }
+      main.textContent = appState.user && count ? "待同步 " + count + " 筆 · 已存此裝置，連線後自動補傳" : "";
+      if (count && !syncInFlight) {
+        const button = document.createElement("button"); button.type = "button"; button.className = "retry-mini";
+        button.textContent = "立即重試"; button.onclick = () => flushPending(); box.appendChild(button);
+      }
+    }
+    function applyPendingState() {
+      const operations = pendingOperations();
+      for (const op of operations) {
+        if ((op.kind === "profile" || op.kind === "fillup") && op.payload.profile) {
+          const p = op.payload.profile;
+          appState.cloudRecord = Object.assign({}, appState.cloudRecord || {}, p);
+          appState.fullInterval = p.full_interval;
+          appState.lastInterval = p.last_interval;
+          els.lastOdometer.value = p.last_odometer == null ? "" : neat(p.last_odometer, 1);
+        } else if (op.kind === "consumables") {
+          consumState = JSON.parse(JSON.stringify(op.payload.snapshot));
+        }
+      }
+      saveState(); saveConsumState(); renderConsumables(); calculate(false); renderPendingStatus();
+    }
+    async function flushPending() {
+      if (syncInFlight || !sb || !appState.user) return false;
+      const uid = appState.user.id;
+      syncInFlight = true; lastSyncError = ""; renderPendingStatus();
+      let changed = false;
+      try {
+        while (appState.user && appState.user.id === uid) {
+          const op = pendingOperations(uid)[0]; if (!op) break;
+          if (op.uid !== uid) throw new Error("帳號不一致，停止補傳。");
+          const { error } = await sb.rpc("sync_tracker_operation", { operation_id: op.id, kind: op.kind, payload: op.payload });
+          if (error) throw error;
+          writePending(uid, pendingOperations(uid).filter((r) => r.id !== op.id)); changed = true;
+        }
+      } catch (e) { lastSyncError = "暫未連上雲端，稍後重試"; console.warn("pending sync:", e.message); }
+      finally { syncInFlight = false; renderPendingStatus(); }
+      if (changed && appState.user && appState.user.id === uid) {
+        await Promise.all([loadFillupsForPage(), cloudLoadMonthTotal(), loadConsumHistory(), loadRepairs(), loadDues()]);
+        renderExpenseSummary();
+      }
+      return pendingOperations(uid).length === 0;
+    }
+    async function saveQueued(kind, payload) {
+      enqueueOperation(makeOperation(kind, payload));
+      return flushPending();
+    }
+    async function loadConsumHistory() {
+      if (!sb || !appState.user) return;
+      const uid = appState.user.id;
+      const { data, error } = await sb.from(HISTORY_TABLE).select("id,item_id,replacement_date,mileage,cost,legacy")
+        .eq("user_id", uid).order("replacement_date", { ascending: false });
+      if (!appState.user || appState.user.id !== uid) return;
+      if (!error) historyCache = data || [];
+      renderConsumHistory();
+    }
+    function consumHistoryRows() {
+      const map = new Map(historyCache.map((r) => [r.id, r]));
+      pendingOperations().filter((r) => r.kind === "consumables").forEach((op) => {
+        (op.payload.history || []).forEach((r) => { if (!map.has(r.id)) map.set(r.id, Object.assign({ pending: true }, r)); });
+      });
+      return [...map.values()];
+    }
+    function renderConsumHistory() {
+      let box = document.getElementById("consumHistory");
+      if (!box) { box = document.createElement("div"); box.id = "consumHistory"; document.getElementById("consumSyncLine").after(box); }
+      const rows = consumHistoryRows().sort((a,b) => String(b.replacement_date).localeCompare(String(a.replacement_date)));
+      box.innerHTML = '<h3 style="font-size:1rem">更換歷史</h3>' + (rows.length ? rows.map((r) => {
+        const item = CONSUMABLES.find((c) => c.id === r.item_id);
+        return '<div class="rp-row"><div class="rp-item">' + escHtml(item ? item.name : r.item_id) +
+          '<div class="fu-sub">' + escHtml(r.replacement_date) + (r.mileage != null ? ' · ' + neat(Number(r.mileage),1) + ' km' : '') +
+          (r.legacy ? ' · 舊記錄（月份）' : '') + (r.pending ? ' · 待同步' : '') + '</div></div><span class="rp-km">HK$' + neat(Number(r.cost),2) + '</span></div>';
+      }).join('') : '<div class="rp-empty">儲存更換記錄後會顯示；每次更換都會保留。</div>');
+    }
+    window.addEventListener("online", () => flushPending());
+    window.addEventListener("storage", (e) => { if (e.key && e.key.startsWith(SYNC_QUEUE_PREFIX)) { renderPendingStatus(); if (appState.user) flushPending(); } });
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) flushPending(); });
+    setInterval(() => { if (appState.user && pendingOperations().length) flushPending(); }, 30000);
 
     function init() {
       bindEvents();
