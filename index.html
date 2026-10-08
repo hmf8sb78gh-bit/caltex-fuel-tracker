@@ -2,7 +2,7 @@
 <html lang="zh-HK">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>加德士油價折扣計數機</title>
 
   <!-- ===== PWA：加到主畫面後變全螢幕 App ===== -->
@@ -3317,6 +3317,17 @@
       }
       if (Number.isFinite(current) && current > 9999999) msgs.push("總里程數值異常偏大，請檢查。");
 
+      const pump = getCurrentPumpPrice();
+      if (!appState.otherBrand) {
+        const discount = getDiscountPerLitre();
+        const voucher = getVoucherAmount();
+        if (!Number.isFinite(discount) || discount < 0 || (pump > 0 && discount >= pump)) {
+          msgs.push("每升折扣必須係非負數，並細過牌價。");
+        }
+        if (!Number.isFinite(voucher) || voucher < 0 || voucher > VOUCHER_STEP) {
+          msgs.push("油券面值必須介乎 0 同 HK$350。");
+        }
+      }
       const text = msgs.join(" ");
       if (els.inputWarn) els.inputWarn.textContent = text;
       return text;
@@ -4453,14 +4464,16 @@
 
     async function cloudLoadRecord() {
       if (!sb || !appState.user) return;
+      const requestUid = appState.user.id;
       setSyncLine("正在由雲端讀取你嘅記錄…");
 
       const { data, error } = await sb
         .from(CLOUD_TABLE)
         .select("*")
-        .eq("user_id", appState.user.id)
+        .eq("user_id", requestUid)
         .maybeSingle();
 
+      if (!appState.user || appState.user.id !== requestUid) return;
       if (error) {
         setSyncLine("雲端讀取失敗：" + error.message);
         return;
@@ -4617,6 +4630,8 @@
     // 登出時清除本地個人記錄（消耗品、入油實付、上次里程），但保留油價/主題等設定
     // 記錄净係留喺雲端，登入先拉返落嚟
     function clearLocalRecords() {
+      clearTimeout(odoSyncTimer);
+      fillupsListCache = [];
       consumState.km = {};
       consumState.cost = {};
       consumState.costYm = {};
@@ -4657,6 +4672,7 @@
       closeConsumPage();
       closeFillupsPage();
       closeRepairsPage();
+      closeDuesPage();
     }
 
     // ===== 清除記錄（雙重確認 → 刪晒雲端三張表＋本機） =====
@@ -4743,6 +4759,7 @@
           return;
         }
         if (session && session.user) {
+          if (!appState.user || appState.user.id !== session.user.id) clearLocalRecords();
           appState.user = session.user;
           els.authPassword.value = "";
           renderAuth();
@@ -4756,6 +4773,7 @@
         } else {
           appState.user = null;
           appState.cloudRecord = null;
+          clearLocalRecords();
           const ymNow = hkYMD().slice(0, 7);
           const ymPrev = prevYm(ymNow);
           fillupMonthTotal = localYmTotal(ymNow);
@@ -5200,6 +5218,10 @@
         return;
       }
 
+      if (Number.isFinite(prevLast) && current <= prevLast) {
+        showStatus("今次總里程必須大過上次，避免重複入帳。");
+        return;
+      }
       const valuesNow = calculateEffectiveValues();
       if (!(valuesNow.litres > 0) || !Number.isFinite(valuesNow.payable) ||
           !(valuesNow.pumpPrice > 0)) {
@@ -5471,7 +5493,7 @@
 
       els.saveOdometerBtn.addEventListener("click", () => {
         flashButton(els.saveOdometerBtn);
-        saveCurrentOdometerAsLast();
+        runButtonTask(els.saveOdometerBtn, saveCurrentOdometerAsLast);
       });
 
       els.loginBtn.addEventListener("click", () => {
@@ -5518,7 +5540,7 @@
 
       // 停車場：已繳費一鍵記今日
       const dueParkingPay = document.getElementById("dueParkingPay");
-      if (dueParkingPay) dueParkingPay.addEventListener("click", payParking);
+      if (dueParkingPay) dueParkingPay.addEventListener("click", (e) => runButtonTask(e.currentTarget, payParking));
 
       // 年費三項：綠框「修改」彈窗
       document.querySelectorAll("[data-edit-kind]").forEach((btn) => {
@@ -5533,7 +5555,7 @@
         if (b) b.addEventListener("click", closeDueEdit);
       });
       const editSave = document.getElementById("dueEditSave");
-      if (editSave) editSave.addEventListener("click", saveDueEdit);
+      if (editSave) editSave.addEventListener("click", (e) => runButtonTask(e.currentTarget, saveDueEdit));
       document.getElementById("dueEditModal")?.addEventListener("click", (e) => {
         if (e.target.id === "dueEditModal") closeDueEdit();
       });
@@ -5972,7 +5994,18 @@
     }
 
     // 撳「儲存」先將所有輸入寫入記錄（本機 + 雲端）
-    function saveConsumables() {
+    async function saveConsumables() {
+      for (const item of CONSUMABLES) {
+        const input = document.querySelector('[data-input="' + item.id + '"]');
+        const cost = document.querySelector('[data-cost="' + item.id + '"]');
+        const v = input ? input.value.trim() : "";
+        const c = cost ? cost.value.trim() : "";
+        if ((!item.dateBased && v && (!Number.isFinite(Number(v)) || Number(v) < 0)) ||
+            (c && (!Number.isFinite(Number(c)) || Number(c) < 0))) {
+          setConsumSync("里程同使費必須係有效嘅非負數。");
+          return;
+        }
+      }
       // 由已有記錄開始（保留冇輸入嘅舊記錄），淨係覆蓋「有輸入」嘅項目
       const next = Object.assign({}, consumState.km || {});
 
@@ -6015,12 +6048,23 @@
       });
 
       if (sb && appState.user) {
-        cloudSaveConsum();
+        await cloudSaveConsum();
       } else {
         setConsumSync("已儲存喺呢部機 ✓（登入帳號可同步到雲端）");
         showToast("已儲存喺呢部機");
       }
       renderExpenseSummary();
+    }
+
+    const busyButtons = new WeakSet();
+    async function runButtonTask(button, task) {
+      if (busyButtons.has(button)) return;
+      busyButtons.add(button);
+      const label = button.textContent;
+      button.disabled = true;
+      try { await task(); }
+      catch (e) { alert("操作未完成：" + (e.message || e)); }
+      finally { busyButtons.delete(button); button.disabled = false; button.textContent = label; }
     }
 
     function setConsumSync(text) {
@@ -6031,14 +6075,16 @@
     // 登入後由雲端攞返消耗品記錄（本機已有嘅值保留，雲端值覆蓋相同項目）
     async function cloudLoadConsum() {
       if (!sb || !appState.user) return;
+      const requestUid = appState.user.id;
       setConsumSync("正在由雲端讀取消耗品記錄…");
 
       const { data, error } = await sb
         .from(CONSUM_TABLE)
         .select("*")
-        .eq("user_id", appState.user.id)
+        .eq("user_id", requestUid)
         .maybeSingle();
 
+      if (!appState.user || appState.user.id !== requestUid) return;
       if (error) {
         setConsumSync("雲端讀取失敗：" + error.message + "（已暫用本機記錄）");
         return;
@@ -6157,12 +6203,13 @@
     // 撈晒全部入油記錄（登入用雲端，否則用本機），等任何月份都揀到
     async function loadFillupsForPage() {
       let rows = [];
+      const requestUid = appState.user && appState.user.id;
 
       if (sb && appState.user) {
         const { data, error } = await sb
           .from(FILLUP_TABLE)
           .select("id,fill_date,paid_amount,trip_km,odometer,fuel_type")
-          .eq("user_id", appState.user.id)
+          .eq("user_id", requestUid)
           .order("fill_date", { ascending: false });
         if (!error) {
           rows = (data || []).map((r) => ({
@@ -6185,6 +6232,7 @@
         }));
       }
 
+      if (requestUid !== (appState.user && appState.user.id)) return;
       fillupsListCache = rows;
       setupFuPicker();
       renderFillupsPage();
@@ -6331,6 +6379,10 @@
         lastOdo = maxOdo > 0 ? maxOdo : null;
       }
 
+      // 舊明細冇升數，刪除後無法精確扣返；重新設基準，避免沿用已刪除油量。
+      appState.fullInterval = { open: lastOdo != null, startOdo: lastOdo, litres: 0, paid: 0, baselineV2: true };
+      appState.lastInterval = null;
+      showStatus("入油記錄已刪除；油耗由剩餘最新里程重新起計。");
       // 本機 UI
       if (els.lastOdometer) {
         els.lastOdometer.value = lastOdo != null ? neat(lastOdo, 1) : "";
@@ -6339,7 +6391,7 @@
       // 帳號彈窗顯示
       if (!appState.cloudRecord) appState.cloudRecord = {};
       appState.cloudRecord.last_odometer = clearAll ? null : lastOdo;
-      appState.cloudRecord.last_consumption = lastCons;
+      appState.cloudRecord.last_consumption = null;
       renderCloudRecord();
       calculate(false);
       saveState();
@@ -6349,7 +6401,9 @@
         const row = {
           user_id: appState.user.id,
           last_odometer: clearAll ? null : lastOdo,
-          last_consumption: lastCons,
+          last_consumption: null,
+          full_interval: appState.fullInterval,
+          last_interval: null,
           updated_at: new Date().toISOString()
         };
         const { error } = await sb.from(CLOUD_TABLE).upsert(row, { onConflict: "user_id" });
@@ -6447,11 +6501,12 @@
 
     async function loadRepairs() {
       let rows = [];
+      const requestUid = appState.user && appState.user.id;
       if (sb && appState.user) {
         const { data, error } = await sb
           .from(REPAIR_TABLE)
           .select("id,repair_date,item,mileage,cost")
-          .eq("user_id", appState.user.id)
+          .eq("user_id", requestUid)
           .order("repair_date", { ascending: false });
         if (!error) {
           rows = (data || []).map((r) => ({
@@ -6466,6 +6521,11 @@
         }
       } else {
         rows = loadLocalRepairs();
+      }
+      if (requestUid !== (appState.user && appState.user.id)) return;
+      if (requestUid) {
+        const seen = new Set(rows.map((r) => String(r.id)));
+        rows = rows.concat(loadLocalRepairs().filter((r) => !seen.has(String(r.id))));
       }
       repairsCache = rows;
       renderRepairs();
@@ -6529,6 +6589,10 @@
       }
       const km = Number(kmEl.value);
       const cost = Number(els.repairCost.value);
+      if (!Number.isFinite(km) || km < 0 || !Number.isFinite(cost) || cost < 0) {
+        setRepairSync("里程同使費必須係有效嘅非負數。");
+        return;
+      }
       // 年月揀選，統一儲做該月 1 號（配合雲端 date 欄位）
       const ym = (yearSel.value || hkYMD().slice(0, 4)) + "-" +
                  (monthSel.value || hkYMD().slice(5, 7));
@@ -6609,7 +6673,8 @@
 
     // #2 匯出 CSV（入油＋維修＋消耗品；帶 BOM，Excel 開中文唔亂碼）
     function csvCell(v) {
-      const s = String(v == null ? "" : v);
+      let s = String(v == null ? "" : v);
+      if (/^[\s]*[=+@-]/.test(s)) s = "\'" + s;
       return '"' + s.replace(/"/g, '""') + '"';
     }
 
@@ -6708,8 +6773,12 @@
         for (const [name, table] of BACKUP_TABLES) {
           try {
             const { data, error } = await sb.from(table).select("*").eq("user_id", appState.user.id);
-            if (!error) payload.cloud[name] = data || [];
-          } catch (e) {}
+            if (error) throw error;
+            payload.cloud[name] = data || [];
+          } catch (e) {
+            alert("備份未完成：" + name + " 讀取失敗，請稍後重試。");
+            return;
+          }
         }
       }
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
@@ -6734,15 +6803,28 @@
           alert("還原失敗：檔案唔係有效嘅 JSON 備份。");
           return;
         }
-        if (!payload || payload.app !== "caltex-fuel-tracker" || (!payload.local && !payload.cloud)) {
+        if (!payload || payload.app !== "caltex-fuel-tracker" || payload.version !== 1 || (!payload.local && !payload.cloud)) {
           alert("還原失敗：呢個檔案唔係本站嘅備份。");
           return;
         }
-        if (!window.confirm("還原會用備份覆蓋而家嘅記錄，確定繼續？")) return;
+        if (payload.cloud && Object.keys(payload.cloud).length && (!sb || !appState.user)) {
+          alert("請先登入帳號，先可以還原雲端記錄。");
+          return;
+        }
+        if (payload.cloud) {
+          for (const [name] of BACKUP_TABLES) {
+            const rows = payload.cloud[name];
+            if (rows !== undefined && (!Array.isArray(rows) || rows.some((r) => !r || typeof r !== "object" || Array.isArray(r)))) {
+              alert("還原失敗：備份記錄格式錯誤。");
+              return;
+            }
+          }
+        }
+        if (!window.confirm("還原會覆蓋現有記錄，請先匯出備份。網絡中斷可能只還原部分資料。確定繼續？")) return;
 
         // 本機部分
         if (payload.local) {
-          Object.keys(payload.local).forEach((k) => {
+          Object.keys(payload.local).filter((k) => BACKUP_LOCAL_KEYS.includes(k)).forEach((k) => {
             try { localStorage.setItem(k, payload.local[k]); } catch (e) {}
           });
         }
@@ -6752,8 +6834,9 @@
           try {
             for (const [name, table] of BACKUP_TABLES) {
               const rows = payload.cloud[name];
-              if (!Array.isArray(rows) || !rows.length) continue;
-              await sb.from(table).delete().eq("user_id", appState.user.id);
+              if (!Array.isArray(rows)) continue;
+              const { error: deleteError } = await sb.from(table).delete().eq("user_id", appState.user.id);
+              if (deleteError) throw deleteError;
               const clean = rows.map((r) => {
                 const o = Object.assign({}, r);
                 delete o.id;
@@ -6763,7 +6846,7 @@
               // 分批，避免一次過太多行
               for (let i = 0; i < clean.length; i += 100) {
                 const { error } = await sb.from(table).insert(clean.slice(i, i + 100));
-                if (error) { console.warn("restore insert failed:", table, error.message); }
+                if (error) throw error;
               }
             }
           } catch (e) {
@@ -6800,8 +6883,9 @@
       if (!dateStr) return "";
       const [y, m, d] = dateStr.split("-").map(Number);
       if (!y || !m || !d) return "";
-      const base = new Date(y, m - 1, d);
-      base.setMonth(base.getMonth() + months);
+      const base = new Date(y, m - 1 + months, 1);
+      const lastDay = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
+      base.setDate(Math.min(d, lastDay));
       const yy = base.getFullYear();
       const mm = String(base.getMonth() + 1).padStart(2, "0");
       const dd = String(base.getDate()).padStart(2, "0");
@@ -6854,11 +6938,12 @@
 
     async function loadDues() {
       let rows = [];
+      const requestUid = appState.user && appState.user.id;
       if (sb && appState.user) {
         const { data, error } = await sb
           .from(DUES_TABLE)
           .select("id,kind,amount,due_date,note")
-          .eq("user_id", appState.user.id)
+          .eq("user_id", requestUid)
           .order("due_date", { ascending: false });
         if (!error) {
           rows = (data || []).map((r) => ({
@@ -6870,6 +6955,11 @@
         }
       } else {
         rows = loadLocalDues();
+      }
+      if (requestUid !== (appState.user && appState.user.id)) return;
+      if (requestUid) {
+        const seen = new Set(rows.map((r) => String(r.id)));
+        rows = rows.concat(loadLocalDues().filter((r) => !seen.has(String(r.id))));
       }
       duesCache = rows;
       renderDues();
@@ -7115,12 +7205,15 @@
         }
       }
 
-      // 先剷走同類舊記錄（只留最新），再插入新嗰筆
+      // 修改現有列；新值儲存失敗時，舊繳費資料仍然保留。
       if (sb && appState.user) {
-        await sb.from(DUES_TABLE).delete().eq("user_id", appState.user.id).eq("kind", kind);
-        const { error } = await sb.from(DUES_TABLE).insert({
-          user_id: appState.user.id, kind, amount, due_date: date, note
-        });
+        const uid = appState.user.id;
+        const existing = latestOf(kind);
+        const row = { user_id: uid, kind, amount, due_date: date, note };
+        const query = existing && !String(existing.id).startsWith("l_")
+          ? sb.from(DUES_TABLE).update(row).eq("id", existing.id).eq("user_id", uid)
+          : sb.from(DUES_TABLE).insert(row);
+        const { error } = await query;
         if (error) { document.getElementById("dueEditMsg").textContent = "儲存失敗：" + error.message; return; }
       } else {
         const kept = loadLocalDues().filter((r) => r.kind !== kind);
@@ -7165,7 +7258,10 @@
       return null; // 攞唔到就用本機 cache
     }
 
+    let expenseRenderVersion = 0;
     async function renderExpenseSummary() {
+      const version = ++expenseRenderVersion;
+      const uid = appState.user && appState.user.id;
       const setTxt = (id, v) => {
         const el = document.getElementById(id);
         if (el) el.textContent = Number.isFinite(v) ? "HK$" + neat(v, 2) : "--";
@@ -7191,7 +7287,8 @@
       let repairRows = [];
       const rpCloud = await fetchYearRows(REPAIR_TABLE, "cost,repair_date", "repair_date", y + "-01-01");
       if (rpCloud) {
-        repairRows = rpCloud.map((r) => ({ date: r.repair_date, cost: Number(r.cost) || 0 }));
+        repairRows = rpCloud.map((r) => ({ date: r.repair_date, cost: Number(r.cost) || 0 }))
+          .concat(loadLocalRepairs().map((r) => ({ date: r.date, cost: Number(r.cost) || 0 })));
       } else {
         repairRows = (repairsCache || []).map((r) => ({ date: r.date, cost: Number(r.cost) || 0 }));
       }
@@ -7224,7 +7321,8 @@
       if (sb && appState.user) {
         const { data } = await sb.from(DUES_TABLE).select("kind,amount,due_date")
           .eq("user_id", appState.user.id);
-        if (data) dues = data.map((r) => ({ kind: r.kind, amount: Number(r.amount) || 0, date: r.due_date }));
+        if (data) dues = data.map((r) => ({ kind: r.kind, amount: Number(r.amount) || 0, date: r.due_date }))
+          .concat(loadLocalDues());
       }
       let parkingM = 0, parkingY = 0;
       // 年費：每項揀最新一筆（唔理邊年俾，代表而家生效緊嘅固定年費）
@@ -7250,6 +7348,7 @@
       const monthNoFuel = repairM + consM + parkingM + annualY / 12;
       const yearNoFuel = repairY + consY + parkingY + annualY;
 
+      if (version !== expenseRenderVersion || uid !== (appState.user && appState.user.id)) return;
       setTxt("expMonthNoFuel", monthNoFuel);
       setTxt("expMonthFuel", monthNoFuel + fuelM);
       setTxt("expYearNoFuel", yearNoFuel);
@@ -7372,13 +7471,13 @@
       document.getElementById("closeRepairsBtn").addEventListener("click", closeRepairsPage);
       document.getElementById("repairAddBtn").addEventListener("click", (e) => {
         flashButton(e.currentTarget);
-        addRepair();
+        runButtonTask(e.currentTarget, addRepair);
       });
       const rpKmEl = document.getElementById("repairMileage");
       if (rpKmEl) rpKmEl.addEventListener("input", updateConsumCurrentLine);
       document.getElementById("consumSaveBtn").addEventListener("click", (e) => {
         flashButton(e.currentTarget);
-        saveConsumables();
+        runButtonTask(e.currentTarget, saveConsumables);
       });
 
       // 消耗品頁右上角：已登入就直接登出，未登入就開登入彈窗
