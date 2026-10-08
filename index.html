@@ -2321,7 +2321,20 @@
     .trend-month {border:0;background:transparent;color:var(--text);padding:7px 0;font:inherit;cursor:pointer;text-decoration:underline;}
     .trend-detail {margin-top:14px;padding:12px;border:1px solid var(--border);border-radius:12px;}
     .trend-detail h3 {margin:0;font-size:1rem;}
-    #expenseTrendDetail {font-size:max(.9rem,13px);line-height:1.7;margin:8px 0;white-space:pre-line;}
+    #expenseTrendDetail {font-size:max(.9rem,13px);line-height:1.5;margin:12px 0 16px;}
+    .trend-total-line {display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;}
+    .trend-total-line strong {font-size:1.25rem;}
+    .trend-mini-label {color:var(--muted);font-size:max(.85rem,12px);}
+    .trend-breakdown {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0;}
+    .trend-breakdown div {min-width:0;}
+    .trend-breakdown dt {color:var(--muted);font-size:max(.85rem,12px);}
+    .trend-breakdown dd {margin:3px 0 0;font-weight:700;overflow-wrap:anywhere;}
+    .trend-metrics {display:flex;gap:8px 18px;flex-wrap:wrap;}
+    .trend-metrics span {color:var(--muted);font-size:max(.85rem,12px);}
+    .trend-metrics strong {color:var(--text);margin-left:6px;}
+    .trend-calculation {margin-top:8px;}
+    .trend-calculation summary {cursor:pointer;color:var(--muted);font-size:max(.85rem,12px);padding:4px 0;}
+    .trend-calculation p {color:var(--muted);font-size:max(.85rem,12px);line-height:1.6;margin:6px 0;white-space:pre-line;}
     .trend-note {color:var(--muted);font-size:max(.85rem,12px);line-height:1.6;}
     .trend-record {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:10px 0;border-top:1px solid var(--border);font-size:max(.9rem,13px);}
     .trend-record strong {overflow-wrap:anywhere;}
@@ -2967,17 +2980,17 @@
         <div class="trend-legend" id="expenseTrendLegend"></div>
         <p class="trend-note" id="expenseTrendPeriod"></p>
         <div class="trend-chart" id="expenseTrendChart"></div>
-        <p class="trend-note">撳圖上月份睇每日開支及逐筆記錄。合計包括油費、維修、消耗品；停車場及年費另見用車開支。</p>
+        <p class="trend-note">撳月份睇明細 · 只計油費、維修及消耗品</p>
         <section class="trend-detail" aria-label="所選月份明細">
           <div class="trend-month-nav"><button type="button" class="btn" id="expenseTrendPrev" aria-label="上一個月">‹</button><select id="expenseTrendMonth" aria-label="明細月份"></select><button type="button" class="btn" id="expenseTrendNext" aria-label="下一個月">›</button></div>
-          <p id="expenseTrendDetail" role="status"></p>
-          <h3>每日開支</h3><div class="trend-legend" aria-label="每日圖表分類"><span><i class="trend-dot" style="background:#fb923c"></i>油費</span><span><i class="trend-dot" style="background:#38bdf8"></i>維修</span><span><i class="trend-dot" style="background:#a78bfa"></i>消耗品</span></div><p class="trend-note">只顯示有記錄嘅日子；撳日期柱睇當日記錄。</p>
+          <div id="expenseTrendDetail" aria-live="polite"></div>
+          <h3>每日開支</h3><div class="trend-legend" aria-label="每日圖表分類"><span><i class="trend-dot" style="background:#fb923c"></i>油費</span><span><i class="trend-dot" style="background:#38bdf8"></i>維修</span><span><i class="trend-dot" style="background:#a78bfa"></i>消耗品</span></div><p class="trend-note">有記錄日子 · 撳日期篩選</p>
           <div class="trend-chart trend-scroll" id="expenseTrendDaily"></div>
           <div class="trend-toolbar"><label class="trend-control">記錄類別<select id="expenseTrendCategory"><option value="all">全部</option><option value="fuel">入油</option><option value="repair">維修</option><option value="consumable">消耗品</option></select></label><button type="button" class="btn" id="expenseTrendAllDays">全月記錄</button></div>
           <p class="trend-note" id="expenseTrendRecordLabel" role="status"></p><div id="expenseTrendRecords"></div>
         </section>
         <details><summary class="trend-table-summary">月份數字對照表（可左右滑動）</summary><div class="trend-scroll" id="expenseTrendTable"></div></details>
-        <p class="trend-note">每公里油費＝有行駛公里記錄嘅入油實付合計÷對應公里合計；前後總里程可補算距離。冇行駛資料嗰筆仍計入開支，但唔計入比率，唔影響其他記錄。呢個比率同滿缸油耗不同；km/L＝行駛公里÷入油升數，非滿缸時只屬估算。舊消耗品記錄只有月份，會計入月合計，但不列入每日圖。</p>
+        <details><summary class="trend-table-summary">計算說明</summary><p class="trend-note">每公里油費＝有行駛公里記錄嘅入油實付合計÷對應公里合計；前後總里程可補算距離。冇行駛資料嗰筆仍計入開支，但唔計入比率，唔影響其他記錄。呢個比率同滿缸油耗不同；km/L＝行駛公里÷入油升數，非滿缸時只屬估算。舊消耗品記錄只有月份，會計入月合計，但不列入每日圖。停車場及年費另見用車開支。</p></details>
       </div>
     </div>
 
@@ -7724,7 +7737,7 @@
       document.getElementById("expenseTrendTotalLabel").textContent='最近'+rows.length+'個月合計';
       document.getElementById("expenseTrendTotal").textContent=money(sum);
       document.getElementById("expenseTrendAverage").textContent=km>0?money(paid/km)+" / km":"未有行駛記錄";
-      document.getElementById("expenseTrendMonth").innerHTML=[...rows].reverse().map((r)=>'<option value="'+r.ym+'"'+(r.ym===expenseTrendSelection?' selected':'')+'>'+r.ym+(r.entries?' · '+money(r.total):' · 無記錄')+'</option>').join('');
+      document.getElementById("expenseTrendMonth").innerHTML=[...rows].reverse().map((r)=>'<option value="'+r.ym+'"'+(r.ym===expenseTrendSelection?' selected':'')+'>'+r.ym.slice(0,4)+'年'+Number(r.ym.slice(5))+'月</option>').join('');
       document.getElementById("expenseTrendTable").innerHTML='<table><thead><tr><th scope="col">月份</th><th scope="col">油費</th><th scope="col">維修</th><th scope="col">消耗品</th><th scope="col">合計</th><th scope="col">油費/km</th></tr></thead><tbody>'+[...rows].reverse().map((r)=>'<tr'+(r.ym===expenseTrendSelection?' class="trend-selected"':'')+'><th scope="row"><button type="button" class="trend-month" data-trend-month="'+r.ym+'">'+r.ym+(r.pending?' · 待同步':'')+'</button></th><td>'+neat(r.fuel,2)+'</td><td>'+neat(r.repair,2)+'</td><td>'+neat(r.consumable,2)+'</td><td>'+neat(r.total,2)+'</td><td>'+(r.costPerKm==null?'—':neat(r.costPerKm,2))+'</td></tr>').join('')+'</tbody></table>';
       renderTrendDetail(expenseTrendSelection);
     }
@@ -7741,7 +7754,10 @@
       document.getElementById("expenseTrendPrev").disabled=i<=0;
       document.getElementById("expenseTrendNext").disabled=i>=rows.length-1;
       document.getElementById("expenseTrendMonth").value=ym;
-      document.getElementById("expenseTrendDetail").textContent=ym+' · 合計 '+money(row.total)+'（'+row.entries+'筆）\n油費 '+money(row.fuel)+' · 維修 '+money(row.repair)+' · 消耗品 '+money(row.consumable)+'\n每公里油費：'+(row.costPerKm==null?'未有可用行駛記錄':money(row.matchedFuel)+' ÷ '+neat(row.km,1)+' km ＝ '+money(row.costPerKm)+' / km（'+row.distanceEntries+'筆）')+(row.unknownEntries?'\n另 '+row.unknownEntries+' 筆 '+money(row.unknownFuel)+' 缺少行駛資料，只計入開支，唔計入比率。':'')+(row.estimated?' · 含舊記錄／估算':'')+(row.pending?' · 含待同步記錄':'')+(ym===hkYMD().slice(0,7)?' · 本月截至今日':'');
+      const detail=document.getElementById("expenseTrendDetail"),expanded=detail.dataset.month===ym&&!!detail.querySelector('details')?.open;
+      detail.dataset.month=ym;
+      const calculation=(row.costPerKm==null?'未有可用行駛記錄':money(row.matchedFuel)+' ÷ '+neat(row.km,1)+' km ＝ '+money(row.costPerKm)+' / km（'+row.distanceEntries+'筆）')+(row.unknownEntries?'\n另 '+row.unknownEntries+' 筆 '+money(row.unknownFuel)+' 只計開支，未計入油費/km。':'')+(row.estimated?'\n含舊記錄／估算。':'')+(ym===hkYMD().slice(0,7)?'\n本月截至今日。':'');
+      detail.innerHTML='<div class="trend-total-line"><span class="trend-mini-label">合計 · '+row.entries+'筆'+(row.pending?' · 待同步':'')+'</span><strong>'+money(row.total)+'</strong></div><dl class="trend-breakdown">'+[['油費',row.fuel],['維修',row.repair],['消耗品',row.consumable]].map(([label,value])=>'<div><dt>'+label+'</dt><dd>'+money(value)+'</dd></div>').join('')+'</dl><div class="trend-metrics"><span>油費/km<strong>'+(row.costPerKm==null?'—':money(row.costPerKm))+'</strong></span><span>行駛<strong>'+(row.distanceEntries?neat(row.km,1)+' km':'—')+'</strong></span></div><details class="trend-calculation"'+(expanded?' open':'')+'><summary>計算詳情'+(row.unknownEntries?' · '+row.unknownEntries+'筆未計比率':'')+'</summary><p>'+escHtml(calculation)+'</p></details>';
       const days=trendDailyRows(row);
       document.getElementById("expenseTrendDaily").innerHTML=days.length?renderTrendSvg(days,'spending',expenseTrendDay,true):'<p class="trend-note">未有可按日顯示嘅記錄。</p>';
       renderTrendRecords(row);
