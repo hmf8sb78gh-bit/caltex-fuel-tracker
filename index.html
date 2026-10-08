@@ -2550,7 +2550,7 @@
               <div class="v" id="expYearNoFuel">--</div>
             </div>
           </div>
-          <p class="sync-line">按繳費日期計入當月及當年，年費計全額，唔攤分。年費目前每項只保留最新一筆。</p>
+          <p class="sync-line">年費按最新金額 ÷12 計入每月，全年計全額；其他開支按繳費日期計。</p>
 
           <div class="sync-line" id="syncLine">已登入，準備就緒。</div>
 
@@ -3063,7 +3063,7 @@
       hmb_north: "港車北上續期", hmb_insurance: "港北保險",
       parking: "停車場費"
     };
-    // 年費類（一年一期、每項淨留最新一筆、按繳費年月計全額、到期前 90 日提示）
+    // 年費類（一年一期、每項淨留最新一筆、開支 ÷12 攤月、到期前 90 日提示）
     const ANNUAL_KINDS = ["license", "insurance", "inspection", "hmb_north", "hmb_insurance"];
 
     // publishable/anon key 只可公開擺前端，真正隔離靠資料庫 RLS（每個帳號只掂到自己嗰行）
@@ -7402,7 +7402,7 @@
       const consM = sumIn(consumRows, "replacement_date", "cost", ym);
       const consY = sumIn(consumRows, "replacement_date", "cost", y);
 
-      // 固定開支按實際繳費日期入帳；共用到期頁嘅完整分頁讀取。
+      // 年費按最新一筆攤分；共用到期頁嘅完整分頁讀取。
       let dues = duesCache || [];
       if (sb && uid) {
         const { data } = await readAccountRows(DUES_TABLE,"id,kind,amount,due_date","due_date",uid);
@@ -7417,11 +7417,14 @@
           dues = [...map.values()];
         }
       }
-      const fixedRows = dues.filter((r) => r.kind === "parking" || ANNUAL_KINDS.includes(r.kind));
-      const fixedM = sumIn(fixedRows, "date", "amount", ym);
-      const fixedY = sumIn(fixedRows, "date", "amount", y);
-      const monthNoFuel = repairM + consM + fixedM;
-      const yearNoFuel = repairY + consY + fixedY;
+      const annualLatest = {};
+      dues.forEach((r) => {
+        if (ANNUAL_KINDS.includes(r.kind) && (!annualLatest[r.kind] || String(r.date) > String(annualLatest[r.kind].date))) annualLatest[r.kind] = r;
+      });
+      const annualY = Object.values(annualLatest).reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+      const parkingRows = dues.filter((r) => r.kind === "parking");
+      const monthNoFuel = repairM + consM + sumIn(parkingRows, "date", "amount", ym) + annualY / 12;
+      const yearNoFuel = repairY + consY + sumIn(parkingRows, "date", "amount", y) + annualY;
 
       if (version !== expenseRenderVersion || uid !== (appState.user && appState.user.id)) return;
       setTxt("expMonthNoFuel", monthNoFuel);
