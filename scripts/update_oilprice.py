@@ -143,14 +143,13 @@ def reconcile_trend_to_supabase(current_gold=None, current_platinum=None):
         "Content-Type": "application/json",
     }
 
-    # 先刪走官方窗口內所有舊列（包括之前誤記、例如無變動都寫入嘅日子），再整批 upsert 官方變動點
-    d = requests.delete(
-        base + f"?price_date=gte.{window_start}",
-        headers={**headers, "Prefer": "return=minimal"},
-        timeout=30,
-    )
-    d.raise_for_status()
-
+    # 先讀舊日期，再寫新資料；寫入失敗時唔刪除現有走勢。
+    old = requests.get(base, headers=headers,
+                       params={"select": "price_date", "price_date": f"gte.{window_start}"},
+                       timeout=30)
+    old.raise_for_status()
+    obsolete = [r["price_date"] for r in old.json()
+                if r["price_date"] not in {r["price_date"] for r in rows}]
     w = requests.post(
         base,
         headers={**headers, "Prefer": "resolution=merge-duplicates,return=minimal"},
@@ -158,6 +157,13 @@ def reconcile_trend_to_supabase(current_gold=None, current_platinum=None):
         timeout=60,
     )
     w.raise_for_status()
+    # 只清走已被官方資料取代嘅日期；新點已成功儲存。
+    for offset in range(0, len(obsolete), 100):
+        batch = obsolete[offset:offset + 100]
+        d = requests.delete(base, headers={**headers, "Prefer": "return=minimal"},
+                            params={"price_date": "in.(" + ",".join(batch) + ")"}, timeout=30)
+        d.raise_for_status()
+
     print(f"走勢已按消委會官方資料重建：{window_start} 起共 {len(rows)} 個變動點。")
 
 
