@@ -2945,6 +2945,8 @@
     const SUPABASE_ANON_KEY = "sb_publishable_Ss5_kVTVICLCtocDhxsdmA_zKbqltwD";
     const CLOUD_TABLE = "fuel_records";
     const CONSUM_TABLE = "consumable_records";
+    const HISTORY_TABLE = "consumable_history";
+    const SYNC_QUEUE_PREFIX = "caltexPendingV2:";
     const FILLUP_TABLE = "fuel_fillups";
     const FILLUP_KEY = "fuelFillupsV1";
     const REPAIR_TABLE = "repair_records";
@@ -7417,8 +7419,6 @@
       syncViewFromHash();
     }
 
-    const SYNC_QUEUE_PREFIX = "caltexPendingV2:";
-    const HISTORY_TABLE = "consumable_history";
     let historyCache = [];
     let syncInFlight = false;
     let lastSyncError = "";
