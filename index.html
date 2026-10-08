@@ -2302,6 +2302,21 @@
       .trend-collapse.open .chart-title,
       .trend-collapse.open .tz-wrap { animation: none; }
     }
+
+    .expense-trend-panel {width:min(94vw,820px);max-height:90vh;overflow-y:auto;}
+    .trend-toolbar {display:flex;gap:10px;align-items:center;margin:12px 0;flex-wrap:wrap;}
+    .trend-toolbar select {flex:1;min-width:160px;}
+    .trend-scroll {overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    #expenseTrendChart svg {display:block;width:100%;min-width:640px;color:var(--muted);}
+    .trend-legend {display:flex;gap:14px;flex-wrap:wrap;font-size:.85rem;margin:10px 0;}
+    .trend-dot {display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;}
+    #expenseTrendTable table {border-collapse:collapse;width:100%;min-width:560px;font-size:.8rem;}
+    #expenseTrendTable th,#expenseTrendTable td {padding:10px 7px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap;}
+    #expenseTrendTable th:first-child {text-align:left;}
+    #expenseTrendTable caption {text-align:left;color:var(--muted);padding:12px 0;}
+    .trend-month {border:0;background:transparent;color:var(--text);padding:4px 0;font:inherit;cursor:pointer;text-decoration:underline;}
+    #expenseTrendDetail {padding:12px;border:1px solid var(--border);border-radius:12px;font-size:.85rem;line-height:1.7;}
+    .trend-note {color:var(--muted);font-size:.8rem;line-height:1.6;}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
@@ -2469,6 +2484,7 @@
           </div>
 
           <h3 class="exp-title" style="margin:16px 0 8px;font-size:1rem;">用車開支</h3>
+          <button type="button" class="btn small-btn blue" data-open-expense-trend>開支趨勢 · 最近12個月</button>
           <div class="exp-grid">
             <div class="exp-cell">
               <div class="k" id="expMonthFuelLabel">本月開支（連油費）</div>
@@ -2814,6 +2830,8 @@
         <span class="consum-auth-btn" style="visibility:hidden">佔位</span>
       </div>
 
+      <div class="card"><h3>用車開支趨勢</h3><p class="consum-tip">比較每月油費、維修、消耗品同每公里油費。</p><button type="button" class="btn blue" data-open-expense-trend>查看最近12個月</button></div>
+
       <!-- 停車場：獨立框，月費＋「已繳費」一鍵記今日，下面係繳費記錄 -->
       <div class="card">
         <div class="due-head">
@@ -2917,6 +2935,20 @@
         <div class="auth-buttons">
           <button type="button" class="btn primary" id="dueRemindOk">知道了</button>
         </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="expenseTrendModal">
+      <div class="modal-panel card expense-trend-panel" role="dialog" aria-modal="true" aria-labelledby="expenseTrendTitle">
+        <div class="modal-head"><h2 id="expenseTrendTitle">開支趨勢</h2><button type="button" class="modal-close" id="expenseTrendClose" aria-label="關閉開支趨勢">✕</button></div>
+        <p class="trend-note">最近12個月 · 所有金額為港元 · 本月截至今日</p>
+        <div class="exp-grid"><div class="exp-cell"><div class="k">12個月已記錄開支</div><div class="v" id="expenseTrendTotal">--</div></div><div class="exp-cell"><div class="k">有里程月份平均油費</div><div class="v" id="expenseTrendAverage">--</div></div></div>
+        <div class="trend-toolbar"><label for="expenseTrendMetric">圖表</label><select id="expenseTrendMetric"><option value="spending">每月開支組成</option><option value="cost">每公里油費</option></select><button type="button" class="btn small-btn" id="expenseTrendRefresh">重新整理</button></div>
+        <div class="trend-legend"><span><i class="trend-dot" style="background:#fb923c"></i>油費</span><span><i class="trend-dot" style="background:#38bdf8"></i>維修</span><span><i class="trend-dot" style="background:#a78bfa"></i>消耗品</span></div>
+        <div class="trend-scroll" id="expenseTrendChart"></div>
+        <p class="trend-note">左右滑動睇圖表；撳明細月份睇詳情。合計為油費＋維修＋消耗品；停車場及年費另見用車開支。每公里油費按該月入油實付÷已記錄行駛距離計，與滿缸油耗口徑不同。</p>
+        <p id="expenseTrendDetail" role="status"></p><div class="trend-scroll" id="expenseTrendTable"></div>
+        <p class="sync-line" id="expenseTrendStatus" role="status">正在讀取…</p>
       </div>
     </div>
 
@@ -4538,6 +4570,10 @@
     function cloudSyncOdometerDebounced() {
       if (!sb || !appState.user) return;
       clearTimeout(odoSyncTimer);
+      expenseTrendRequest++; expenseTrendData=null; expenseTrendSelection=null;
+      document.getElementById("expenseTrendChart").innerHTML="";
+      document.getElementById("expenseTrendTable").innerHTML="";
+      document.getElementById("expenseTrendModal").classList.add("hidden");
       odoSyncTimer = setTimeout(() => {
         const lastOdo = els.lastOdometer ? Number(els.lastOdometer.value) : NaN;
         const lastCons = appState.cloudRecord && appState.cloudRecord.last_consumption != null
@@ -7499,6 +7535,7 @@
       if (changed && appState.user && appState.user.id === uid) {
         await Promise.all([loadFillupsForPage(), cloudLoadMonthTotal(), loadConsumHistory(), loadRepairs(), loadDues()]);
         renderExpenseSummary();
+        if (!document.getElementById("expenseTrendModal").classList.contains("hidden")) loadExpenseTrends();
       }
       return pendingOperations(uid).length === 0;
     }
@@ -7538,8 +7575,119 @@
     document.addEventListener("visibilitychange", () => { if (!document.hidden) flushPending(); });
     setInterval(() => { if (appState.user && pendingOperations().length) flushPending(); }, 30000);
 
+    let expenseTrendData = null;
+    let expenseTrendRequest = 0;
+    let expenseTrendSelection = null;
+    function trendMonths(now, count = 12) {
+      const [year, month] = now.split("-").map(Number);
+      return Array.from({ length: count }, (_, i) => {
+        const d = new Date(Date.UTC(year, month - count + i, 1));
+        return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2,"0");
+      });
+    }
+    function buildExpenseTrend(now, fills, repairs, consumables, priorOdo = null) {
+      const months = trendMonths(now);
+      const buckets = new Map(months.map((ym) => [ym, { ym, fuel:0, repair:0, consumable:0, km:0, entries:0, estimated:false, pending:false }]));
+      let prev = priorOdo != null ? Number(priorOdo) : NaN;
+      [...fills].sort((a,b) => String(a.fill_date).localeCompare(String(b.fill_date)) || Number(a.odometer)-Number(b.odometer)).forEach((r) => {
+        const b = buckets.get(String(r.fill_date).slice(0,7));
+        const odo = r.odometer == null ? NaN : Number(r.odometer);
+        let km = 0;
+        if (r.litres != null) km = Math.max(0,Number(r.trip_km)||0);
+        else if (Number.isFinite(odo) && Number.isFinite(prev) && odo >= prev) km = odo-prev;
+        else { const trip = Number(r.trip_km)||0; if (trip > 0 && (!Number.isFinite(odo) || trip < odo)) km = trip; }
+        if (b) { b.fuel += Number(r.paid_amount)||0; b.km += km; b.entries++; b.pending ||= !!r.pending; b.estimated ||= r.litres == null; }
+        if (Number.isFinite(odo)) prev=odo;
+      });
+      repairs.forEach((r) => { const b=buckets.get(String(r.repair_date).slice(0,7)); if(b){b.repair+=Number(r.cost)||0;b.entries++;b.pending ||= !!r.pending;} });
+      consumables.forEach((r) => { const b=buckets.get(String(r.replacement_date).slice(0,7));if(b){b.consumable+=Number(r.cost)||0;b.entries++;b.estimated ||= !!r.legacy;b.pending ||= !!r.pending;} });
+      return [...buckets.values()].map((b) => Object.assign(b,{total:b.fuel+b.repair+b.consumable,costPerKm:b.km>0?b.fuel/b.km:null}));
+    }
+    async function fetchTrendRows(table, columns, dateColumn, start, uid) {
+      const rows=[];
+      for (let offset=0;;offset+=500) {
+        const {data,error}=await sb.from(table).select(columns).eq("user_id",uid).gte(dateColumn,start)
+          .order(dateColumn,{ascending:true}).order("id",{ascending:true}).range(offset,offset+499);
+        if(error) throw error;
+        rows.push(...(data||[])); if(!data || data.length<500) return rows;
+      }
+    }
+    async function loadExpenseTrends() {
+      if(!appState.user){openAuthModal();return;}
+      const uid=appState.user.id,request=++expenseTrendRequest,start=trendMonths(hkYMD())[0]+"-01";
+      const status=document.getElementById("expenseTrendStatus");status.textContent="正在讀取開支記錄…";
+      const key="caltexExpenseTrendV1:"+uid;
+      let cached={fills:[],repairs:[],consumables:[],priorOdo:null};
+      try {cached=Object.assign(cached,JSON.parse(localStorage.getItem(key)||"{}"));}catch(e){}
+      const results=await Promise.allSettled([
+        fetchTrendRows(FILLUP_TABLE,"id,fill_date,paid_amount,trip_km,odometer,litres","fill_date",start,uid),
+        fetchTrendRows(REPAIR_TABLE,"id,repair_date,cost","repair_date",start,uid),
+        fetchTrendRows(HISTORY_TABLE,"id,replacement_date,cost,legacy","replacement_date",start,uid),
+        sb.from(FILLUP_TABLE).select("odometer").eq("user_id",uid).lt("fill_date",start)
+          .order("fill_date",{ascending:false}).order("odometer",{ascending:false}).limit(1)
+      ]);
+      if(request!==expenseTrendRequest || !appState.user || appState.user.id!==uid)return;
+      let partial=false;
+      ["fills","repairs","consumables"].forEach((name,i)=>{if(results[i].status==="fulfilled")cached[name]=results[i].value;else partial=true;});
+      const prior=results[3];
+      if(prior.status==="fulfilled" && !prior.value.error){cached.priorOdo=prior.value.data?.[0]?.odometer??null;}else partial=true;
+      try {localStorage.setItem(key,JSON.stringify(cached));}catch(e){}
+      const fillMap=new Map(cached.fills.map((r)=>[r.id,r])),repairMap=new Map(cached.repairs.map((r)=>[r.id,r])),consMap=new Map(cached.consumables.map((r)=>[r.id,r]));
+      pendingOperations(uid).forEach((op)=>{
+        if(op.kind==="fillup" && !fillMap.has(op.id))fillMap.set(op.id,Object.assign({pending:true},op.payload.fillup));
+        if(op.kind==="repair" && !repairMap.has(op.id))repairMap.set(op.id,Object.assign({pending:true},op.payload));
+        if(op.kind==="consumables")(op.payload.history||[]).forEach((r)=>{if(!consMap.has(r.id))consMap.set(r.id,Object.assign({pending:true},r));});
+      });
+      expenseTrendData=buildExpenseTrend(hkYMD(),[...fillMap.values()],[...repairMap.values()],[...consMap.values()],cached.priorOdo);
+      status.textContent=partial?"部分資料未能更新，暫用已讀取資料及待同步記錄。":"已更新 · 待同步記錄亦已計入";
+      renderExpenseTrends();
+    }
+    function renderTrendSvg(rows, metric) {
+      const moneyMetric=metric==="spending",max=Math.max(1,...rows.map((r)=>moneyMetric?r.total:r.costPerKm||0));
+      const width=720,height=245,left=55,top=18,plotHeight=180,step=53;
+      let svg='<svg viewBox="0 0 '+width+' '+height+'" role="img" aria-label="'+(moneyMetric?'每月油費、維修及消耗品開支':'每月每公里油費')+'"><title>按月份比較已記錄開支</title>';
+      for(let i=0;i<=4;i++){const value=max*i/4,y=top+plotHeight-plotHeight*i/4;svg+='<line x1="50" y1="'+y+'" x2="705" y2="'+y+'" stroke="currentColor" opacity=".15"/><text x="44" y="'+(y+4)+'" text-anchor="end" fill="currentColor" font-size="11">'+neat(value,moneyMetric?0:2)+'</text>';}
+      rows.forEach((r,i)=>{
+        const x=left+i*step+7;
+        if(moneyMetric){let base=top+plotHeight;[['fuel','#fb923c'],['repair','#38bdf8'],['consumable','#a78bfa']].forEach(([key,color])=>{const h=r[key]/max*plotHeight;base-=h;svg+='<rect x="'+x+'" y="'+base+'" width="30" height="'+h+'" fill="'+color+'"><title>'+r.ym+' '+money(r[key])+'</title></rect>';});}
+        else if(r.costPerKm!=null){const h=r.costPerKm/max*plotHeight;svg+='<rect x="'+x+'" y="'+(top+plotHeight-h)+'" width="30" height="'+h+'" rx="3" fill="#fb923c"><title>'+r.ym+' HK$'+neat(r.costPerKm,2)+'/km</title></rect>';}
+        svg+='<text x="'+(x+15)+'" y="221" text-anchor="middle" fill="currentColor" font-size="11">'+r.ym.slice(2).replace('-','/')+'</text>';
+      });return svg+'</svg>';
+    }
+    function renderExpenseTrends() {
+      if(!expenseTrendData)return;
+      const metric=document.getElementById("expenseTrendMetric").value;
+      const rows=expenseTrendData,hasData=rows.some((r)=>r.entries>0);
+      document.getElementById("expenseTrendChart").innerHTML=hasData?renderTrendSvg(rows,metric):'<p class="consum-tip">未有開支記錄；儲存入油、維修或消耗品記錄後就會顯示。</p>';
+      const sum=rows.reduce((s,r)=>s+r.total,0),measured=rows.filter((r)=>r.km>0),km=measured.reduce((s,r)=>s+r.km,0),paid=measured.reduce((s,r)=>s+r.fuel,0);
+      document.getElementById("expenseTrendTotal").textContent=money(sum);
+      document.getElementById("expenseTrendAverage").textContent=km>0?money(paid/km)+" / km":"未有足夠里程";
+      document.getElementById("expenseTrendTable").innerHTML='<table><caption>最近12個月開支明細</caption><thead><tr><th scope="col">月份</th><th scope="col">油費</th><th scope="col">維修</th><th scope="col">消耗品</th><th scope="col">合計</th><th scope="col">油費/km</th></tr></thead><tbody>'+[...rows].reverse().map((r)=>'<tr><th scope="row"><button type="button" class="trend-month" data-trend-month="'+r.ym+'">'+r.ym+(r.pending?' · 待同步':'')+'</button></th><td>'+neat(r.fuel,2)+'</td><td>'+neat(r.repair,2)+'</td><td>'+neat(r.consumable,2)+'</td><td>'+neat(r.total,2)+'</td><td>'+(r.costPerKm==null?'—':neat(r.costPerKm,2))+'</td></tr>').join('')+'</tbody></table>';
+      expenseTrendSelection=expenseTrendSelection&&rows.some((r)=>r.ym===expenseTrendSelection)?expenseTrendSelection:rows[rows.length-1].ym;
+      renderTrendDetail(expenseTrendSelection);
+    }
+    function renderTrendDetail(ym) {
+      const row=expenseTrendData?.find((r)=>r.ym===ym);if(!row)return;
+      expenseTrendSelection=ym;
+      document.getElementById("expenseTrendDetail").textContent=ym+"：已記錄開支 "+money(row.total)+" · 行駛 "+neat(row.km,1)+" km · 每公里油費 "+(row.costPerKm==null?"未有足夠里程":money(row.costPerKm)+" / km")+(row.estimated?"（含舊記錄／估算）":"")+(ym===hkYMD().slice(0,7)?" · 本月截至今日":"");
+    }
+    function openExpenseTrends() {
+      if(!appState.user){openAuthModal();return;}
+      animOpen(document.getElementById("expenseTrendModal"));loadExpenseTrends();
+    }
+    function initExpenseTrends() {
+      document.querySelectorAll('[data-open-expense-trend]').forEach((el)=>el.addEventListener("click",openExpenseTrends));
+      const modal=document.getElementById("expenseTrendModal");
+      document.getElementById("expenseTrendClose").addEventListener("click",()=>animClose(modal));
+      modal.addEventListener("click",(e)=>{if(e.target===modal)animClose(modal);});
+      document.getElementById("expenseTrendMetric").addEventListener("change",renderExpenseTrends);
+      document.getElementById("expenseTrendRefresh").addEventListener("click",loadExpenseTrends);
+      document.getElementById("expenseTrendTable").addEventListener("click",(e)=>{const el=e.target.closest('[data-trend-month]');if(el)renderTrendDetail(el.dataset.trendMonth);});
+    }
+
     function init() {
       bindEvents();
+      initExpenseTrends();
       initFontScale();
       initTheme();
       renderAuth();
