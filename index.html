@@ -2361,6 +2361,48 @@
     .rule-overlay.show.closing .rule-card {animation:panelDrop .22s cubic-bezier(.4,0,.6,1) both;}
     @media(max-width:640px){.expense-trend-panel select {font-size:max(16px,1em);}}
     @media(max-width:380px){.page-head {gap:6px;}.back-btn,.consum-auth-btn {padding:8px;font-size:.8rem;}.page-title {font-size:1rem;}}
+    /* 全站按鈕：扁平色塊、輕邊框，唔再用光澤／厚陰影。 */
+    :root {--control-bg:#1c283a;--control-hover:#29384d;--control-border:rgba(148,163,184,.2);--control-link:#93c5fd;}
+    body.light {--control-bg:#f1f5f9;--control-hover:#e2e8f0;--control-border:rgba(15,23,42,.12);--control-link:#1d4ed8;}
+    body button {transition:background .18s ease,border-color .18s ease,opacity .18s ease,transform .18s ease;}
+    body button.btn,body button.rule-close {background:var(--control-bg);color:var(--text);border:1px solid var(--control-border);border-radius:12px;font-weight:650;box-shadow:none;min-height:46px;}
+    body button.btn::after {display:none;}
+    body button.btn.primary,body button.rule-close {background:#c2410c;color:#fff;border-color:transparent;}
+    body button.btn.blue {background:#2563eb;color:#fff;border-color:transparent;}
+    body button.btn.green {background:#15803d;color:#fff;border-color:transparent;}
+    body button.btn.wipe-btn {background:rgba(239,68,68,.1);color:#fca5a5;border-color:transparent;}
+    body.light button.btn.wipe-btn {color:#b91c1c;}
+    body button.btn.wipe-confirm {background:#b91c1c;color:#fff;border-color:transparent;}
+    body button:is(.back-btn,.consum-auth-btn,.consum-entry,.trend-toggle,.acct-btn,.theme-toggle,.modal-close,.other-toggle),
+    body.light button:is(.back-btn,.consum-auth-btn,.consum-entry,.trend-toggle,.acct-btn,.theme-toggle,.modal-close,.other-toggle) {background:var(--control-bg);color:var(--text);border:1px solid var(--control-border);border-radius:12px;font-weight:650;box-shadow:none;}
+    body button.consum-entry {min-height:42px;}
+    body button:is(.acct-btn,.theme-toggle,.modal-close) {min-height:44px;}
+    body button.theme-toggle,body button.modal-close {width:44px;height:44px;border-radius:50%;}
+    body button.acct-btn {height:44px;}
+    body button.retry-mini,body.light button.retry-mini {border:1px solid var(--control-border);background:var(--control-bg);color:var(--control-link);border-radius:8px;min-height:32px;font-weight:600;}
+    body button.other-toggle.on {background:rgba(249,115,22,.12);border-color:#c2410c;color:var(--text);}
+    body .segmented,body.light .segmented {background:var(--control-bg);border:1px solid var(--control-border);border-radius:14px;}
+    body .seg-thumb {background:#c2410c;border-radius:10px;box-shadow:none;}
+    body .segmented button {border-radius:10px;font-weight:650;}
+    body .segmented button.active,body.light .segmented button.active {color:#fff;}
+    body button.row-del,body.light button.row-del {background:rgba(239,68,68,.1);border:0;color:#fca5a5;border-radius:8px;min-height:32px;font-weight:600;}
+    body.light button.row-del {color:#b91c1c;}
+    body button.rule-q {width:28px;height:28px;border:1px solid var(--control-border);background:var(--control-bg);color:var(--text);font-weight:600;}
+    body button.tz-arrow {min-height:28px;box-shadow:none;border-color:var(--control-border);}
+    body button.trend-month {color:var(--control-link);text-decoration:none;font-weight:650;}
+    body button:active {filter:none;}
+    @media(hover:hover){
+      body button.btn:hover {box-shadow:none;filter:none;transform:none;background:var(--control-hover);}
+      body button.btn.primary:hover,body button.rule-close:hover {background:#9a3412;box-shadow:none;}
+      body button.btn.blue:hover {background:#1d4ed8;box-shadow:none;}
+      body button.btn.green:hover {background:#166534;box-shadow:none;}
+      body button.btn.wipe-confirm:hover {background:#991b1b;}
+      body button.btn.wipe-btn:hover {background:rgba(239,68,68,.18);}
+      body button:is(.back-btn,.consum-auth-btn,.consum-entry,.trend-toggle,.acct-btn,.theme-toggle,.modal-close,.other-toggle):hover {background:var(--control-hover);transform:none;box-shadow:none;}
+    }
+    body button.btn:active,body button:is(.back-btn,.consum-auth-btn,.consum-entry,.trend-toggle,.acct-btn,.theme-toggle,.modal-close,.rule-close):active {transform:scale(.98);filter:none;}
+    body button.flash {animation:controlTap .22s ease;}
+    @keyframes controlTap {0%,100%{opacity:1;}50%{opacity:.8;}}
     @media(prefers-reduced-motion:reduce){
       *,*::before,*::after {animation:none!important;transition:none!important;scroll-behavior:auto!important;}
       button:hover,button:active,.consum-entry:hover,.consum-entry:active,.consum-entry .ce-arrow {transform:none!important;}
@@ -2878,8 +2920,6 @@
         <h2 class="page-title">到期提醒 / 固定開支</h2>
         <button class="consum-auth-btn" id="duesAuthBtn" data-open-account type="button">登入 / 註冊</button>
       </div>
-
-      <div class="card"><h3>用車開支趨勢</h3><p class="consum-tip">比較每月油費、維修、消耗品同每公里油費。</p><button type="button" class="btn blue trend-action" data-open-expense-trend>查看開支趨勢</button></div>
 
       <!-- 停車場：獨立框，月費＋「已繳費」一鍵記今日，下面係繳費記錄 -->
       <div class="card">
