@@ -3099,7 +3099,7 @@
     }
 
     function numberValue(el, fallback = 0) {
-      const n = Number(el.value);
+      const n = el.value.trim() === "" ? NaN : Number(el.value);
       return Number.isFinite(n) ? n : fallback;
     }
 
@@ -3267,7 +3267,7 @@
         : Number(appState.prices.platinum);
     }
 
-    function getDiscountPerLitre() {
+    function getDiscountPerLitre(fuelType = appState.fuelType) {
       if (els.discountCard.value === "custom") {
         return numberValue(els.customDiscount, 0);
       }
@@ -3276,7 +3276,7 @@
       const goldDiscount = parts[0] || 0;
       const platinumDiscount = parts[1] || 0;
 
-      return appState.fuelType === "gold" ? goldDiscount : platinumDiscount;
+      return fuelType === "gold" ? goldDiscount : platinumDiscount;
     }
 
     function getVoucherAmount() {
@@ -3348,7 +3348,7 @@
       if (appState.otherBrand) {
         const oL = Math.max(0, litres);
         if (!Number.isFinite(pumpPrice) || pumpPrice <= 0 || oL <= 0) return empty;
-        const oTotal = pumpPrice * oL;
+        const oTotal = Number((pumpPrice * oL).toFixed(2));
         return Object.assign({}, empty, {
           listTotal: oTotal,
           billedAmount: oTotal,
@@ -3356,7 +3356,7 @@
           cardDiscountTotal: 0,
           cardNetPerLitre: pumpPrice,
           payable: oTotal,
-          realPerLitre: pumpPrice
+          realPerLitre: oTotal / oL
         });
       }
 
@@ -3385,7 +3385,7 @@
       const cardDiscountTotal = cardDiscount * billedLitres;
 
       // ⑤ 應付金額 = 計入帳單金額 − 卡折
-      const payable = Math.max(0, billedAmount - cardDiscountTotal);
+      const payable = Number(Math.max(0, billedAmount - cardDiscountTotal).toFixed(2));
 
       // ⑥ 最終油價（實際每升）= 應付金額 / 實際入油量
       const realPerLitre =
@@ -4736,6 +4736,12 @@
 
       // 訂閱登入狀態：初始化、登入、登出都會觸發
       sb.auth.onAuthStateChange((event, session) => {
+        // Token 刷新唔好再次載入／重建，避免覆蓋正在輸入嘅狀態。
+        if (event === "TOKEN_REFRESHED" && session && appState.user &&
+            session.user.id === appState.user.id) {
+          appState.user = session.user;
+          return;
+        }
         if (session && session.user) {
           appState.user = session.user;
           els.authPassword.value = "";
@@ -4934,9 +4940,10 @@
       const { error } = await sb.from(FILLUP_TABLE).insert(row);
       if (error) {
         console.warn("fillup insert failed:", error.message);
-        return;
+        return false;
       }
       await cloudLoadMonthTotal();
+      return true;
     }
 
     async function cloudLoadMonthTotal() {
@@ -4987,12 +4994,13 @@
           .reduce((s, r) => s + (Number(r.paid_amount) || 0), 0);
         // 里程：優先用前後總里程差重算（避免舊錯誤 trip_km 記成總里程）；
         // 冇總里程先用 trip_km；冇任何前筆（全帳號第一筆）就視做基準、唔計
-        let prevOdo = beforeRows && beforeRows[0] ? Number(beforeRows[0].odometer) : NaN;
+        let prevOdo = beforeRows && beforeRows[0] && beforeRows[0].odometer != null
+          ? Number(beforeRows[0].odometer) : NaN;
         const kmBuckets = {};
         kmBuckets[ym] = 0;
         kmBuckets[pYm] = 0;
         rangeRows.forEach((r) => {
-          const o = Number(r.odometer);
+          const o = r.odometer == null || r.odometer === "" ? NaN : Number(r.odometer);
           let d = 0;
           if (Number.isFinite(o) && Number.isFinite(prevOdo) && o >= prevOdo) {
             d = o - prevOdo;
@@ -5022,7 +5030,7 @@
       let D = 0;
       let V = 0;
       if (fuelType === "gold" || fuelType === "platinum") {
-        D = getDiscountPerLitre();
+        D = getDiscountPerLitre(fuelType);
         V = getVoucherAmount();
       }
       const net = P - D;
@@ -5060,7 +5068,7 @@
       let Dsum = 0;
 
       rows.forEach((r, i) => {
-        const o = Number(r.odometer);
+        const o = r.odometer == null || r.odometer === "" ? NaN : Number(r.odometer);
         if (i === 0) {
           if (Number.isFinite(o) && o > 0) {
             startOdo = o;
@@ -5087,7 +5095,8 @@
       if (!Number.isFinite(startOdo)) startOdo = 0;
 
       const acc = appState.fullInterval || {};
-      const accHasData = !!(acc.open && acc.litres > 0);
+      // 已同步嘅空區間亦係有效狀態（剛入滿結算），唔可以重建成全部歷史。
+      const accHasData = !!(acc.open && (acc.baselineV2 || acc.litres > 0));
       let changed = false;
 
       if (!accHasData && rows.length >= 2) {
@@ -5192,6 +5201,11 @@
       }
 
       const valuesNow = calculateEffectiveValues();
+      if (!(valuesNow.litres > 0) || !Number.isFinite(valuesNow.payable) ||
+          !(valuesNow.pumpPrice > 0)) {
+        showStatus("請先輸入有效嘅入油量同牌價，再儲存入油記錄。");
+        return;
+      }
       const tripKm = current - prevLast;
       let lastCostPerKm = null;
 
@@ -5293,10 +5307,11 @@
         }
         try {
           const ok = await cloudSaveRecord(current, lastCostPerKm);
-          if (hasFillup) await cloudAddFillup(paidNow, tripKmNow, current);
+          const fillupOk = !hasFillup || await cloudAddFillup(paidNow, tripKmNow, current);
+          const allOk = ok && fillupOk;
           showStatus((intervalMsg ? intervalMsg + " " : "") +
-            (ok ? "已同步到你嘅帳號 ✓" : "（雲端同步失敗，本機已存）"));
-          if (ok) showToast("已儲存並同步雲端 ✓");
+            (allOk ? "已同步到你嘅帳號 ✓" : "（雲端未完整同步，本機已存；請勿重複儲存，先檢查入油記錄）"));
+          if (allOk) showToast("已儲存並同步雲端 ✓");
         } catch (e) {
           showStatus((intervalMsg ? intervalMsg + " " : "") +
             "雲端同步失敗：" + (e && e.message ? e.message : e));
@@ -5693,12 +5708,12 @@
       const vals = [];
       [els.currentOdometer, els.lastOdometer].forEach((el) => {
         if (el) {
-          const n = Number(el.value);
+          const n = el.value.trim() === "" ? NaN : Number(el.value);
           if (Number.isFinite(n) && n > 0) vals.push(n);
         }
       });
       document.querySelectorAll('[data-input]').forEach((el) => {
-        const n = Number(el.value);
+        const n = el.value.trim() === "" ? NaN : Number(el.value);
         if (Number.isFinite(n) && n > 0) vals.push(n);
       });
       // 已儲存嘅消耗品上次更換里程（刷新後輸入框空白，都要計入）
@@ -5717,7 +5732,7 @@
       const vals = [];
       [els.currentOdometer, els.lastOdometer].forEach((el) => {
         if (el) {
-          const n = Number(el.value);
+          const n = el.value.trim() === "" ? NaN : Number(el.value);
           if (Number.isFinite(n) && n > 0) vals.push(n);
         }
       });
@@ -5732,7 +5747,7 @@
         if (Number.isFinite(n) && n > 0) vals.push(n);
       }
       document.querySelectorAll('[data-input]').forEach((el) => {
-        const n = Number(el.value);
+        const n = el.value.trim() === "" ? NaN : Number(el.value);
         if (Number.isFinite(n) && n > 0) vals.push(n);
       });
       // 已儲存嘅消耗品上次更換里程（刷新後輸入框空白，都要計入）
