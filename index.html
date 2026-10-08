@@ -2550,7 +2550,7 @@
               <div class="v" id="expYearNoFuel">--</div>
             </div>
           </div>
-          <p class="sync-line">月開支：油費＋維修＋消耗品＋停車場，牌費/保險/驗車/港車北上/港北保險等年費按最新一筆÷12攤分；年開支計各項最新年費同當年維修、消耗品、停車場。</p>
+          <p class="sync-line">按繳費日期計入當月及當年，年費計全額，唔攤分。年費目前每項只保留最新一筆。</p>
 
           <div class="sync-line" id="syncLine">已登入，準備就緒。</div>
 
@@ -3063,7 +3063,7 @@
       hmb_north: "港車北上續期", hmb_insurance: "港北保險",
       parking: "停車場費"
     };
-    // 年費類（一年一期、每項淨留最新一筆、開支 ÷12 攤月、到期前 90 日提示）
+    // 年費類（一年一期、每項淨留最新一筆、按繳費年月計全額、到期前 90 日提示）
     const ANNUAL_KINDS = ["license", "insurance", "inspection", "hmb_north", "hmb_insurance"];
 
     // publishable/anon key 只可公開擺前端，真正隔離靠資料庫 RLS（每個帳號只掂到自己嗰行）
@@ -7402,11 +7402,10 @@
       const consM = sumIn(consumRows, "replacement_date", "cost", ym);
       const consY = sumIn(consumRows, "replacement_date", "cost", y);
 
-      // 固定開支：年費類每項只留最新一筆（可能跨年俾錢），所以要攞晒、唔好只篩今年
+      // 固定開支按實際繳費日期入帳；共用到期頁嘅完整分頁讀取。
       let dues = duesCache || [];
-      if (sb && appState.user) {
-        const { data } = await sb.from(DUES_TABLE).select("id,kind,amount,due_date")
-          .eq("user_id", appState.user.id);
+      if (sb && uid) {
+        const { data } = await readAccountRows(DUES_TABLE,"id,kind,amount,due_date","due_date",uid);
         if (data) {
           const map = new Map(data.map((r) => [r.id, { kind: r.kind, amount: Number(r.amount) || 0, date: r.due_date }]));
           pendingOperations().filter((op) => op.kind === "parking" || op.kind === "due").forEach((op) => {
@@ -7414,32 +7413,15 @@
             if (op.kind === "due") for (const [id, row] of map) { if (row.kind === p.kind) map.delete(id); }
             if (!map.has(op.id)) map.set(op.id, { kind: op.kind === "parking" ? "parking" : p.kind, amount: p.amount, date: p.due_date });
           });
-          dues = [...map.values()].concat(loadLocalDues());
+          loadLocalDues().forEach((r) => { if (!map.has(r.id)) map.set(r.id, r); });
+          dues = [...map.values()];
         }
       }
-      let parkingM = 0, parkingY = 0;
-      // 年費：每項揀最新一筆（唔理邊年俾，代表而家生效緊嘅固定年費）
-      const annualLatest = {};
-      dues.forEach((r) => {
-        if (ANNUAL_KINDS.indexOf(r.kind) !== -1) {
-          if (!annualLatest[r.kind] || String(r.date) > String(annualLatest[r.kind].date)) {
-            annualLatest[r.kind] = r;
-          }
-        } else if (r.kind === "parking") {
-          // 停車場按月俾，照實際入帳年月計
-          if (String(r.date || "").slice(0, 4) === y) {
-            parkingY += r.amount;
-            if (String(r.date).slice(0, 7) === ym) parkingM += r.amount;
-          }
-        }
-      });
-      const annualY = ANNUAL_KINDS.reduce(
-        (s, k) => s + (annualLatest[k] ? Number(annualLatest[k].amount) || 0 : 0), 0
-      );
-
-      // 月：年費類 ÷12 攤分；年：各項最新年費如實加總
-      const monthNoFuel = repairM + consM + parkingM + annualY / 12;
-      const yearNoFuel = repairY + consY + parkingY + annualY;
+      const fixedRows = dues.filter((r) => r.kind === "parking" || ANNUAL_KINDS.includes(r.kind));
+      const fixedM = sumIn(fixedRows, "date", "amount", ym);
+      const fixedY = sumIn(fixedRows, "date", "amount", y);
+      const monthNoFuel = repairM + consM + fixedM;
+      const yearNoFuel = repairY + consY + fixedY;
 
       if (version !== expenseRenderVersion || uid !== (appState.user && appState.user.id)) return;
       setTxt("expMonthNoFuel", monthNoFuel);
