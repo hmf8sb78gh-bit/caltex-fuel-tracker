@@ -2370,6 +2370,7 @@
     body button.btn.primary,body button.rule-close {background:#c2410c;color:#fff;border-color:transparent;}
     body button.btn.blue {background:#2563eb;color:#fff;border-color:transparent;}
     body button.btn.green {background:#15803d;color:#fff;border-color:transparent;}
+    body button.btn.primary,body button.btn.blue,body button.btn.green {box-shadow:none;}
     body button.btn.wipe-btn {background:rgba(239,68,68,.1);color:#fca5a5;border-color:transparent;}
     body.light button.btn.wipe-btn {color:#b91c1c;}
     body button.btn.wipe-confirm {background:#b91c1c;color:#fff;border-color:transparent;}
@@ -2401,7 +2402,7 @@
       body button:is(.back-btn,.consum-auth-btn,.consum-entry,.trend-toggle,.acct-btn,.theme-toggle,.modal-close,.other-toggle):hover {background:var(--control-hover);transform:none;box-shadow:none;}
     }
     body button.btn:active,body button:is(.back-btn,.consum-auth-btn,.consum-entry,.trend-toggle,.acct-btn,.theme-toggle,.modal-close,.rule-close):active {transform:scale(.98);filter:none;}
-    body button.flash {animation:controlTap .22s ease;}
+    body button.flash,body button.btn.flash,body .segmented button.flash,body button.theme-btn.flash {animation:controlTap .22s ease;}
     @keyframes controlTap {0%,100%{opacity:1;}50%{opacity:.8;}}
     @media(prefers-reduced-motion:reduce){
       *,*::before,*::after {animation:none!important;transition:none!important;scroll-behavior:auto!important;}
