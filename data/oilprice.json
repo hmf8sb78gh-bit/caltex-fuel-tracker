@@ -1,16 +1,16 @@
 {
   "source": "香港消費者委員會油價資訊通",
   "source_url": "https://oil-price.consumer.org.hk/tc",
-  "fetched_at_hkt": "2026-10-09 11:29:57",
+  "fetched_at_hkt": "2026-10-09 18:59:21",
   "data": {
     "brand": "Caltex 加德士",
     "gold": {
       "name": "黃金汽油",
-      "price": 34.62
+      "price": 34.52
     },
     "platinum": {
       "name": "白金汽油",
-      "price": 36.42
+      "price": 36.32
     }
   }
 }
