@@ -2802,7 +2802,7 @@
         </div>
 
         <div class="result main has-prev">
-          <div class="k">每公里油費</div>
+          <div class="k">今次付款 / 行駛公里</div>
           <div class="v" id="resultCostPerKm">--</div>
           <span class="prev-badge" id="resultPrevCost"></span>
         </div>
@@ -2814,11 +2814,12 @@
         </div>
 
         <div class="result">
-          <div class="k">油耗</div>
+          <div class="k">滿缸實測油耗</div>
           <div class="v" id="resultFuelConsumption">--</div>
         </div>
       </div>
 
+      <p class="small">今次付款 ÷ 今次行駛距離，只供開支參考；實測油耗按兩次滿缸之間嘅完整升數計算。</p>
       <p class="interval-line" id="intervalLine" style="display:none;"></p>
 
       <button type="button" class="btn green result-save" id="saveOdometerBtn">儲存</button>
@@ -3140,6 +3141,7 @@
       authReady: false,     // Supabase 登入狀態是否已確認（未確認前唔好彈走 #consumables）
       // 滿缸法區間：兩次「入滿」之間累積；startOdo＝上次入滿時嘅總里程
       fullInterval: { open: false, startOdo: null, litres: 0, paid: 0 },
+      lastFillupResult: null, // 最近已儲存單筆結果，唔使用累積區間代替
       lastInterval: null    // 上一次結算結果 {dist,litres,paid,costPerKm,kmPerL,date}
     };
 
@@ -3298,12 +3300,13 @@
 
     function saveState() {
       const data = {
-        version: 8,
+        version: 9,
         fuelType: appState.fuelType,
         otherBrand: !!appState.otherBrand,
         prices: appState.prices,
         fullInterval: appState.fullInterval,
         lastInterval: appState.lastInterval,
+        lastFillupResult: appState.lastFillupResult,
 
         manualGoldPrice: els.manualGoldPrice.value,
         manualPlatinumPrice: els.manualPlatinumPrice.value,
@@ -3342,6 +3345,7 @@
           );
         }
         if (data.lastInterval) appState.lastInterval = data.lastInterval;
+        if (data.lastFillupResult) appState.lastFillupResult = data.lastFillupResult;
 
         if (data.prices) {
           appState.prices = {
@@ -3428,7 +3432,8 @@
       const last = numberValue(els.lastOdometer, NaN);
       const current = numberValue(els.currentOdometer, NaN);
 
-      if (!Number.isFinite(last) || !Number.isFinite(current)) return NaN;
+      if (!els.lastOdometer.value.trim() || !els.currentOdometer.value.trim() ||
+          !(last > 0) || !Number.isFinite(current)) return NaN;
 
       const distance = current - last;
       if (!Number.isFinite(distance) || distance <= 0) return NaN;
@@ -3698,109 +3703,57 @@
     }
 
     function updatePrevCostBadge() {
-      // 滿缸法：優先顯示上一次結算區間嘅每公里油費
       const li = appState.lastInterval;
-      if (li && Number.isFinite(li.costPerKm)) {
-        els.resultPrevCost.textContent = "上次 HK$" + neat(li.costPerKm, 2) + "/km";
-        return;
-      }
-      const r = appState.cloudRecord;
-      const v = r && r.last_consumption != null ? Number(r.last_consumption) : NaN;
-      els.resultPrevCost.textContent = Number.isFinite(v)
-        ? "上次 HK$" + neat(v, 2) + "/km"
-        : "";
+      els.resultPrevCost.textContent = li && Number.isFinite(li.costPerKm)
+        ? "上次區間 HK$" + neat(li.costPerKm, 2) + "/km" : "";
     }
 
-    // 滿缸法（B：預設自動累計，唔使入滿；剔「今次入滿」只係對齊重計）
+    function getSingleFillupView(values) {
+      const active = !!els.currentOdometer.value.trim();
+      const saved = appState.lastFillupResult;
+      if (!active && saved && saved.odometer === numberValue(els.lastOdometer, NaN)) {
+        return { distance: saved.distance, paid: saved.paid, saved: true };
+      }
+      return { distance: getDistanceKm(), paid: values.payable, saved: false };
+    }
+
+    // 只有完整升數＋兩次滿缸，先可顯示實測油耗。累積開支另行標明。
     function getIntervalView(values) {
-      const chk = !!(els.fullTankChk && els.fullTankChk.checked);
       const acc = appState.fullInterval;
-      // 今次欄空（Number("")=0）要當未輸入，否則儲存後會被誤判做里程 0
-      const curRaw = els.currentOdometer && els.currentOdometer.value.trim();
-      const curOdo = curRaw ? numberValue(els.currentOdometer, NaN) : NaN;
-      const curLitres = Number.isFinite(values.litres) ? values.litres : 0;
-      const curPaid = Number.isFinite(values.payable) ? values.payable : 0;
-      const li = appState.lastInterval;
-
-      let cost = NaN;
-      let kmL = NaN;
-      let status = "";
-      let cls = "";
-
-      const hasBase0 = acc.open && acc.startOdo != null;
-      // 今次總里程欄空（剛儲存完）時，用「上次總里程」做當前位置，令儲存後油耗仍即時顯示
-      const currentInputActive = Number.isFinite(curOdo);
-      const effCur = currentInputActive ? curOdo : numberValue(els.lastOdometer, NaN);
-      // 今次欄嘅油量/金額已入咗 acc，淨輸入時唔好重複加
-      const effLitres = currentInputActive ? curLitres : 0;
-      const effPaid = currentInputActive ? curPaid : 0;
-      const hasBase = hasBase0 && Number.isFinite(effCur) && effCur > acc.startOdo;
-      const totalL = acc.litres + effLitres;
-      const totalP = acc.paid + effPaid;
-      const totalD = hasBase ? effCur - acc.startOdo : 0;
-
-      if (chk && hasBase) {
-        // 剔入滿：結算呢段並對齊重計
-        if (totalL > 0) {
-          kmL = totalD / totalL;
-          cost = totalP / totalD;
-        }
-        status = "今次入滿（跳槍）會結算並重新起計：累計 " + neat(totalL, 2) + " 升、HK$" +
-          neat(totalP, 2) + "、" + neat(totalD, 1) + " km";
-        cls = "ok";
-      } else if (chk && !acc.open) {
-        status = "今次入滿會做為起點，之後入油自動累計，唔使再入滿。";
-        cls = "warn";
-      } else if (!chk && hasBase) {
-        // 普通入油：即時累計平均
-        if (totalL > 0 && totalD > 0) {
-          kmL = totalD / totalL;
-          cost = totalP / totalD;
-        }
-        status = "累計中：" + neat(totalL, 2) + " 升、HK$" + neat(totalP, 2) + "、" +
-          neat(totalD, 1) + " km（入滿跳槍可剔號重新起計）";
-        cls = "ok";
-      } else if (!chk && acc.open) {
-        status = "累計中，輸入今次總里程就出到平均油耗。";
-        cls = "warn";
-      } else {
-        status = "第一次儲存後自動開始累計，唔使入滿；入滿跳槍可剔號重新起計。";
-        cls = "warn";
+      const active = !!els.currentOdometer.value.trim();
+      const full = active && !!(els.fullTankChk && els.fullTankChk.checked);
+      const current = active ? numberValue(els.currentOdometer, NaN) : numberValue(els.lastOdometer, NaN);
+      const totalL = Number(acc.litres) + (active ? values.litres : 0);
+      const totalP = Number(acc.paid) + (active ? values.payable : 0);
+      const totalD = acc.open && acc.startOdo != null && current > Number(acc.startOdo)
+        ? current - Number(acc.startOdo) : NaN;
+      const complete = acc.volumeComplete === true && !acc.estimated &&
+        (!active || (Number.isFinite(values.litres) && values.litres > 0));
+      const measured = full && acc.startFull === true && complete && Number.isFinite(totalL) && totalL > 0 && totalD > 0;
+      let kmL = measured ? totalD / totalL : NaN;
+      let status = "實測油耗暫未能可靠計算：需要兩次滿缸及區間內每筆完整升數。";
+      if (totalD > 0 && Number.isFinite(totalP)) {
+        status = "區間累積（起點 " + neat(Number(acc.startOdo), 1) + " km）：" +
+          neat(totalD, 1) + " km、HK$" + neat(totalP, 2) +
+          "；區間付款 / 距離 HK$" + neat(totalP / totalD, 2) + "/km。" + status;
       }
-
-      // 未出到數就顯示返上一次結算值（如有）
-      let estimate = false;
-      if (acc.estimated) estimate = true;
-      if (!Number.isFinite(cost) && li) {
-        cost = li.costPerKm;
+      if (measured) {
+        status = "今次滿缸將結算實測區間：" + neat(totalD, 1) + " km、" + neat(totalL, 2) +
+          " 升；區間付款 / 距離 HK$" + neat(totalP / totalD, 2) + "/km。";
+      } else if (full) {
+        status += " 今次滿缸會設為新起點。";
+      } else if (!active && appState.lastFillupResult && appState.lastFillupResult.measuredInterval) {
+        const li = appState.lastFillupResult.measuredInterval;
         kmL = li.kmPerL;
+        status = "已完成滿缸實測：" + li.date + "，" + neat(li.dist, 1) + " km、" +
+          neat(li.litres, 2) + " 升；區間付款 / 距離 HK$" + neat(li.costPerKm, 2) + "/km。";
       }
-
-      // 仲未有跳槍區間：用今次單次入油做粗略估算（假設兩次油位相若，僅供參考）
-      if (!Number.isFinite(cost) || !Number.isFinite(kmL)) {
-        const singleD = getDistanceKm();
-        if (Number.isFinite(singleD) && singleD > 0) {
-          if (!Number.isFinite(kmL) && curLitres > 0) {
-            kmL = singleD / curLitres;
-            estimate = true;
-          }
-          if (!Number.isFinite(cost) && curPaid > 0) {
-            cost = curPaid / singleD;
-            estimate = true;
-          }
-          if (estimate) {
-            status = "未夠跳槍記錄，暫以今次入油同里程估算大約值，剔「今次入滿（跳槍）」兩次後會更準。";
-            cls = "warn";
-          }
-        }
-      }
-
       if (els.intervalLine) {
         els.intervalLine.textContent = status;
-        els.intervalLine.className = "interval-line " + cls;
-        els.intervalLine.style.display = status ? "" : "none";
+        els.intervalLine.className = "interval-line " + (Number.isFinite(kmL) ? "ok" : "warn");
+        els.intervalLine.style.display = "";
       }
-      return { cost, kmL, estimate, totalD };
+      return { kmL, totalD, totalL, totalP, complete, measured };
     }
 
     // 結果數字跳字（通用）：fmt 控制點樣顯示，prevMap 記每個元素舊值
@@ -3853,12 +3806,9 @@
       validateInputs();
 
       const values = calculateEffectiveValues();
-      const singleD = getDistanceKm();
+      const single = getSingleFillupView(values);
       const intervalView = getIntervalView(values);
-      // 距離卡：優先今次行駛；剛儲存完（今次欄空）就顯示累計總里程
-      const distanceKm = Number.isFinite(singleD)
-        ? singleD
-        : (Number.isFinite(intervalView.totalD) && intervalView.totalD > 0 ? intervalView.totalD : NaN);
+      const distanceKm = single.distance;
 
       updateTopFuelSummary(values);
       updateFuelCompare();
@@ -3867,7 +3817,7 @@
       updateMonthTotalLine();
       updateEntryDot();
 
-      if (!Number.isFinite(values.pumpPrice) || values.pumpPrice <= 0) {
+      if ((!Number.isFinite(values.pumpPrice) || values.pumpPrice <= 0) && !single.saved) {
         els.resultPay.textContent = "--";
         els.resultCostPerKm.textContent = "--";
         els.resultDistanceKm.textContent = Number.isFinite(distanceKm)
@@ -3882,18 +3832,18 @@
         return;
       }
 
-      // 每公里油費／油耗：優先用滿缸法區間；未夠跳槍記錄就用今次單次估算（標「約」）
-      const costPerKm = intervalView.cost;
+      const costPerKm = distanceKm > 0 && Number.isFinite(single.paid) ? single.paid / distanceKm : NaN;
       const kmPerLitre = intervalView.kmL;
-      const estPfx = intervalView.estimate ? "約 " : "";
 
       // 結果區淨係撳「計算」先彈出（calcBtn 會 remove hidden）；淨輸入唔強行展開
       // 四個數一律跳字：實付、每公里、距離、油耗；撳計算先播動畫（延遲少少等卡滑入），輸入緊就靜默更新
       const twDelay = shouldScroll ? 280 : 0;
-      tweenResultNumber(els.resultPay, values.payable, (n) => money(n), shouldScroll, twDelay);
-      tweenResultNumber(els.resultCostPerKm, costPerKm, (n) => estPfx + money(n) + " / km", shouldScroll, twDelay);
+      tweenResultNumber(els.resultPay, single.paid, (n) => money(n), shouldScroll, twDelay);
+      tweenResultNumber(els.resultCostPerKm, costPerKm, (n) => money(n) + " / km", shouldScroll, twDelay);
       tweenResultNumber(els.resultDistanceKm, distanceKm, (n) => neat(n, 1) + " km", shouldScroll, twDelay);
-      tweenResultNumber(els.resultFuelConsumption, kmPerLitre, (n) => estPfx + neat(n, 2) + " km / L", shouldScroll, twDelay);
+      tweenResultNumber(els.resultFuelConsumption, kmPerLitre, (n) => neat(n, 2) + " km / L", shouldScroll, twDelay);
+      els.resultFuelConsumption.style.fontSize = Number.isFinite(kmPerLitre) ? "" : "1rem";
+      if (!Number.isFinite(kmPerLitre)) els.resultFuelConsumption.textContent = "暫未能可靠計算";
       if (shouldScroll) playResultPop();
 
       const time =
@@ -4641,25 +4591,6 @@
       }
     }
 
-    // 舊帳號一次性修正：第一次入油唔計油耗，將基準重設為最新總里程，之前累積作廢
-    function migrateBaselineOnce(latestOdo) {
-      const acc = appState.fullInterval || {};
-      if (acc.baselineV2) return false;
-      if (Number.isFinite(latestOdo) && latestOdo > 0) {
-        appState.fullInterval = {
-          open: true,
-          startOdo: Number(latestOdo.toFixed(1)),
-          litres: 0,
-          paid: 0,
-          baselineV2: true
-        };
-      } else {
-        appState.fullInterval = Object.assign({}, acc, { open: acc.open || false, baselineV2: true });
-      }
-      appState.lastInterval = null;
-      return true;
-    }
-
     async function cloudLoadRecord() {
       if (!sb || !appState.user) return;
       const requestUid = appState.user.id;
@@ -4694,20 +4625,7 @@
         if (data.last_interval && typeof data.last_interval === "object") {
           appState.lastInterval = data.last_interval;
         }
-        // 舊帳號一次性修正：第一次入油唔計油耗，基準重設做最新里程
-        const cloudInterval = data.full_interval && typeof data.full_interval === "object"
-          ? data.full_interval : null;
-        if ((!cloudInterval || !cloudInterval.baselineV2) && !pendingOperations().some((op) => op.kind === "profile" || op.kind === "fillup")) {
-          const latestOdo = Number(data.last_odometer);
-          const changed = migrateBaselineOnce(Number.isFinite(latestOdo) ? latestOdo : NaN);
-          if (changed) {
-            calculate(false);
-            saveState();
-            if (Number.isFinite(latestOdo) && latestOdo > 0) {
-              cloudSaveRecord(latestOdo, null); // 將新基準同步返雲端
-            }
-          }
-        }
+        // 讀取唔重設雲端基準；舊區間由明細驗證，缺資料時停用實測油耗。
         // 注意：「今次入油總里程」同「燃油種類」都唔由雲端還原；
         // 燃油種類預設跟實際每升平嗰款，除非用戶今次自己撳過。
         calculate(false);
@@ -4822,6 +4740,7 @@
       appState.cloudRecord = null;
       appState.fullInterval = { open: false, startOdo: null, litres: 0, paid: 0 };
       appState.lastInterval = null;
+      appState.lastFillupResult = null;
       if (els.fullTankChk) els.fullTankChk.checked = false;
       renderConsumables();
       updateMonthTotalLine();
@@ -5173,128 +5092,52 @@
       updateMonthTotalLine();
     }
 
-    // 反推一筆入油嘅升數：用該日牌價＋而家折扣卡/油券設定，
-    // 解 payable = L·(P−D) − s·V·(1−D/P)，逐個券數 s 試
-    function estimateLitresForRow(date, paid, fuelType) {
-      const hist = loadPriceHist();
-      const dates = Object.keys(hist).filter((d) => d <= date).sort();
-      if (!dates.length) return NaN;
-      const h = hist[dates[dates.length - 1]];
-      const P = fuelType === "platinum" ? Number(h.p)
-        : fuelType === "gold" ? Number(h.g) : NaN;
-      if (!(P > 0)) return NaN;
-      let D = 0;
-      let V = 0;
-      if (fuelType === "gold" || fuelType === "platinum") {
-        D = getDiscountPerLitre(fuelType);
-        V = getVoucherAmount();
-      }
-      const net = P - D;
-      if (!(net > 0)) return NaN;
-      for (let s = 0; s <= 12; s++) {
-        const L = (paid + s * V * (1 - D / P)) / net;
-        if (L <= 0) continue;
-        const gross = Number((P * L).toFixed(2));
-        const s2 = V > 0 ? Math.floor(gross / VOUCHER_STEP) : 0;
-        const voucher = s2 * V;
-        const billed = gross - voucher;
-        const calcPay = Math.max(0, billed - D * (billed / P));
-        if (s2 === s && Math.abs(calcPay - paid) < 0.05) return L;
-      }
-      return NaN;
-    }
-
-    // 登入後用後台全部入油記錄重建：總里程、基準、油耗累積
+    // 登入後只讀明細，還原單筆結果同驗證區間；唔反推升數或改寫雲端基準。
     async function reconcileFromCloud() {
       if (!sb || !appState.user) return;
+      const uid = appState.user.id;
       if (pendingOperations().some((op) => op.kind === "profile" || op.kind === "fillup")) return;
-      const { data, error } = await sb
-        .from(FILLUP_TABLE)
+      const { data, error } = await sb.from(FILLUP_TABLE)
         .select("fill_date,paid_amount,trip_km,odometer,fuel_type,litres,full_tank")
-        .eq("user_id", appState.user.id)
-        .order("fill_date", { ascending: true });
-      if (error || !data || !data.length) return;
-
-      const rows = data;
-      // 行一次：基準＝第一筆；總里程、距離、油量逐筆累積（冇 odometer 就用 trip_km）
-      let startOdo = NaN;
-      let prevOdo = NaN;
-      let maxOdo = NaN;
-      let L = 0;
-      let P = 0;
-      let Dsum = 0;
-
-      rows.forEach((r, i) => {
-        const o = r.odometer == null || r.odometer === "" ? NaN : Number(r.odometer);
-        if (i === 0) {
-          if (Number.isFinite(o) && o > 0) {
-            startOdo = o;
-            prevOdo = o;
-            maxOdo = o;
-          }
-          return;
-        }
-        const paid = Number(r.paid_amount) || 0;
-        P += paid;
-        if (Number.isFinite(o) && o > 0) {
-          if (!(maxOdo > 0) || o > maxOdo) maxOdo = o;
-          if (Number.isFinite(prevOdo) && o >= prevOdo) Dsum += o - prevOdo;
-          else Dsum += Number(r.trip_km) || 0;
-          prevOdo = o;
-        } else {
-          Dsum += Number(r.trip_km) || 0;
-        }
-        const l = r.litres != null ? Number(r.litres) : estimateLitresForRow(r.fill_date, paid, r.fuel_type);
-        if (Number.isFinite(l)) L += l;
-      });
-
-      // 全部冇 odometer 嘅舊帳號：以 0 做虛擬起點，距離用 trip_km 加總
-      if (!Number.isFinite(startOdo)) startOdo = 0;
-
-      const acc = appState.fullInterval || {};
-      // 已同步嘅空區間亦係有效狀態（剛入滿結算），唔可以重建成全部歷史。
-      const accHasData = !!(acc.open && (acc.baselineV2 || acc.litres > 0));
-      let changed = false;
-
-      if (!accHasData && rows.length >= 2) {
-        appState.fullInterval = {
-          open: true,
-          startOdo: Number(startOdo.toFixed(1)),
-          litres: Number(L.toFixed(2)),
-          paid: Number(P.toFixed(2)),
-          baselineV2: true,
-          estimated: L > 0
-        };
-        changed = true;
-      } else if (!acc.open && Number.isFinite(startOdo)) {
-        appState.fullInterval = Object.assign({}, acc, {
-          open: true,
-          startOdo: Number(startOdo.toFixed(1)),
-          baselineV2: true
-        });
-        changed = true;
+        .eq("user_id", uid).order("fill_date", { ascending: true });
+      if (!appState.user || appState.user.id !== uid || error || !data || !data.length) return;
+      const rows = data.slice().sort((a, b) => String(a.fill_date).localeCompare(String(b.fill_date)) || Number(a.odometer) - Number(b.odometer));
+      const latest = rows[rows.length - 1];
+      const previous = rows[rows.length - 2];
+      const distance = previous && Number(previous.odometer) > 0 && Number(latest.odometer) > Number(previous.odometer)
+        ? Number(latest.odometer) - Number(previous.odometer) : Number(latest.trip_km);
+      appState.lastFillupResult = {
+        odometer: Number(latest.odometer), distance: distance > 0 ? distance : NaN,
+        paid: latest.paid_amount == null ? NaN : Number(latest.paid_amount)
+      };
+      const acc = appState.fullInterval;
+      const anchor = rows.findIndex((r) => r.odometer != null && Number(r.odometer) === Number(acc.startOdo));
+      const explicitBaseline = anchor < 0 && acc.startFull === true && acc.volumeComplete === true && !acc.estimated;
+      const intervalRows = anchor >= 0 ? rows.slice(anchor + 1)
+        : explicitBaseline ? rows.filter((r) => Number(r.odometer) > Number(acc.startOdo)) : [];
+      let prev = anchor >= 0 ? Number(rows[anchor].odometer) : explicitBaseline ? Number(acc.startOdo) : NaN;
+      let complete = anchor >= 0 || explicitBaseline;
+      let L = 0, P = 0;
+      for (const r of intervalRows) {
+        const l = r.litres == null ? NaN : Number(r.litres);
+        const o = r.odometer == null ? NaN : Number(r.odometer);
+        complete = complete && l > 0 && Number.isFinite(l) && o > prev && r.full_tank !== true;
+        prev = o;
+        if (l > 0 && Number.isFinite(l)) L += l;
+        P += Number(r.paid_amount) || 0;
       }
-
-      // 現時總里程：後台最大 odometer 若大過目前值，就更新（包括消耗品/維修在內比）
-      const otherMax = cloudCurrentMileage();
-      if (Number.isFinite(maxOdo) && maxOdo > 0 && (!(otherMax > 0) || maxOdo > otherMax)) {
-        els.lastOdometer.value = neat(maxOdo, 1);
-        changed = true;
+      acc.startFull = explicitBaseline || (anchor >= 0 && rows[anchor].full_tank === true);
+      acc.volumeComplete = complete && Math.abs(L - Number(acc.litres)) < 0.02 &&
+        Math.abs(P - Number(acc.paid)) < 0.02;
+      const li = appState.lastInterval;
+      if (latest.full_tank === true && li && li.measured === true && li.date === latest.fill_date &&
+          Number(latest.odometer) === Number(acc.startOdo)) {
+        appState.lastFillupResult.measuredInterval = li;
       }
-
-      if (!changed) return;
-
+      // Old aggregate with missing/estimated litres remains stored, but cannot produce measured fuel economy.
+      if (Number(latest.odometer) > 0) els.lastOdometer.value = neat(Number(latest.odometer), 1);
       calculate(false);
       saveState();
-      const acc2 = appState.fullInterval;
-      let lastCost = null;
-      if (acc2.open && acc2.paid > 0 && Dsum > 0) {
-        lastCost = acc2.paid / Dsum;
-      }
-      const syncOdo = Number(els.lastOdometer.value);
-      if (Number.isFinite(syncOdo) && syncOdo > 0) {
-        await cloudSaveRecord(syncOdo, lastCost);
-      }
     }
 
     async function saveCurrentOdometerAsLast() {
@@ -5330,7 +5173,7 @@
         (!fillupsListCache || !fillupsListCache.length) &&
         !loadLocalFillups().length;
       if (firstBaseline) {
-        appState.fullInterval = { open: true, startOdo: current, litres: 0, paid: 0, baselineV2: true };
+        appState.fullInterval = { open: true, startOdo: current, litres: 0, paid: 0, baselineV2: true, startFull: !!(els.fullTankChk && els.fullTankChk.checked), volumeComplete: true };
         if (els.fullTankChk) els.fullTankChk.checked = false;
         els.lastOdometer.value = neat(current, 1);
         els.currentOdometer.value = "";
@@ -5357,6 +5200,10 @@
         return;
       }
 
+      if (!(prevLast > 0)) {
+        showStatus("未能確認上次入油總里程，請重新載入入油記錄再儲存。");
+        return;
+      }
       if (Number.isFinite(prevLast) && current <= prevLast) {
         showStatus("今次總里程必須大過上次，避免重複入帳。");
         return;
@@ -5367,8 +5214,8 @@
         showStatus("請先輸入有效嘅入油量同牌價，再儲存入油記錄。");
         return;
       }
-      const tripKm = current - prevLast;
-      let lastCostPerKm = null;
+      const tripKm = getDistanceKm();
+      let lastCostPerKm = Number.isFinite(tripKm) ? valuesNow.payable / tripKm : null;
 
       // 一併記低今次實付金額＋行駛里程（本機 + 雲端），並更新本月累計
       const paidNow = Number.isFinite(valuesNow.payable) ? valuesNow.payable : 0;
@@ -5390,63 +5237,36 @@
         updateMonthTotalLine();
       }
 
-      // ===== 滿缸法區間結算／累積 =====
-      const curLitresNow = numberValue(els.litres, 0);
+      // Save and preview share the same validated interval and single-trip values.
       const isFull = !!(els.fullTankChk && els.fullTankChk.checked);
+      const view = getIntervalView(valuesNow);
       const acc = appState.fullInterval;
-      let intervalMsg = "";
-
+      let measuredInterval = null;
+      let intervalMsg = "實測油耗暫未能可靠計算：需要兩次滿缸及每筆完整升數。";
       if (isFull) {
-        // 今次入滿：若已有起點就結算
-        if (acc.open && acc.startOdo != null && current > acc.startOdo) {
-          const totalL = acc.litres + curLitresNow;
-          const totalP = acc.paid + paidNow;
-          const totalD = current - acc.startOdo;
-          if (totalL > 0) {
-            const cost = totalP / totalD;
-            appState.lastInterval = {
-              dist: totalD,
-              litres: totalL,
-              paid: totalP,
-              costPerKm: cost,
-              kmPerL: totalD / totalL,
-              date: hkYMD()
-            };
-            lastCostPerKm = cost;
-            intervalMsg = "已結算（兩次入滿之間）：" + neat(totalL, 2) + " 升、" +
-              neat(totalD, 1) + " km、HK$" + neat(cost, 2) + "/km、" +
-              neat(totalD / totalL, 2) + " km/L。";
-          }
-        } else {
-          intervalMsg = "已將今次入滿設為起點，之後入油自動累計，唔使再入滿。";
-        }
-        // 今次入滿做新區間起點（佢本身嘅升數／金額唔計入新區間）
-        appState.fullInterval = { open: true, startOdo: current, litres: 0, paid: 0, baselineV2: true };
-      } else {
-        // 普通入油（冇剔入滿）：未開過就自動開起點並計埋今次，否則一路累積
-        if (!acc.open) {
-          appState.fullInterval = {
-            open: true,
-            startOdo: current,
-            litres: curLitresNow,
-            paid: paidNow,
-            baselineV2: true
+        if (view.measured) {
+          measuredInterval = {
+            dist: view.totalD, litres: view.totalL, paid: view.totalP,
+            costPerKm: view.totalP / view.totalD, kmPerL: view.kmL,
+            date: hkYMD(), measured: true
           };
-          intervalMsg = "已開始自動累計（唔使入滿），下次入油就出到平均油耗。";
+          appState.lastInterval = measuredInterval;
+          intervalMsg = "已結算滿缸實測：" + neat(view.totalD, 1) + " km、" +
+            neat(view.totalL, 2) + " 升、" + neat(view.kmL, 2) + " km/L。";
         } else {
-          acc.litres += curLitresNow;
-          acc.paid += paidNow;
-          const dd = current - acc.startOdo;
-          if (dd > 0 && acc.litres > 0) {
-            const avgCost = acc.paid / dd;
-            lastCostPerKm = avgCost;
-            intervalMsg = "已累計：" + neat(acc.litres, 2) + " 升、" + neat(dd, 1) +
-              " km、平均 HK$" + neat(avgCost, 2) + "/km、" + neat(dd / acc.litres, 2) + " km/L。";
-          } else {
-            intervalMsg = "已累計 " + neat(acc.litres, 2) + " 升、HK$" + neat(acc.paid, 2) + "。";
-          }
+          intervalMsg += " 已將今次滿缸設為新起點。";
         }
+        appState.fullInterval = { open: true, startOdo: current, litres: 0, paid: 0,
+          baselineV2: true, startFull: true, volumeComplete: true };
+      } else if (!acc.open) {
+        appState.fullInterval = { open: true, startOdo: current, litres: 0, paid: 0,
+          baselineV2: true, startFull: false, volumeComplete: true };
+      } else {
+        acc.litres = Number(acc.litres) + valuesNow.litres;
+        acc.paid = Number(acc.paid) + paidNow;
+        acc.volumeComplete = view.complete;
       }
+      appState.lastFillupResult = { odometer: current, distance: tripKm, paid: paidNow, measuredInterval };
       if (els.fullTankChk) els.fullTankChk.checked = false;
 
       els.lastOdometer.value = neat(current, 1);
@@ -5576,25 +5396,29 @@
 
       els.goldBtn.addEventListener("click", () => {
         userFuelOverride = true;
+        appState.lastFillupResult = null;
         flashButton(els.goldBtn);
         setFuelType("gold");
       });
 
       els.platinumBtn.addEventListener("click", () => {
         userFuelOverride = true;
+        appState.lastFillupResult = null;
         flashButton(els.platinumBtn);
         setFuelType("platinum");
       });
 
       els.otherBrandToggle.addEventListener("click", () => {
+        appState.lastFillupResult = null;
         flashButton(els.otherBrandToggle);
         setOtherBrand(!appState.otherBrand);
       });
       if (els.otherPrice) {
-        els.otherPrice.addEventListener("input", () => calculate(false));
+        els.otherPrice.addEventListener("input", () => { appState.lastFillupResult = null; calculate(false); });
       }
 
       els.applyManualBtn.addEventListener("click", () => {
+        appState.lastFillupResult = null;
         flashButton(els.applyManualBtn);
         applyManualPrices();
       });
@@ -5612,6 +5436,7 @@
         els.manualPlatinumPrice
       ].forEach((el) => {
         el.addEventListener("input", () => {
+          appState.lastFillupResult = null;
           calculate(false);
           saveState();
           if (el === els.currentOdometer || el === els.lastOdometer) {
@@ -5620,6 +5445,7 @@
         });
 
         el.addEventListener("change", () => {
+          appState.lastFillupResult = null;
           calculate(false);
           saveState();
           if (el === els.currentOdometer || el === els.lastOdometer) {
@@ -6563,6 +6389,7 @@
       // 舊明細冇升數，刪除後無法精確扣返；重新設基準，避免沿用已刪除油量。
       appState.fullInterval = { open: lastOdo != null, startOdo: lastOdo, litres: 0, paid: 0, baselineV2: true };
       appState.lastInterval = null;
+      appState.lastFillupResult = null;
       showStatus("入油記錄已刪除；油耗由剩餘最新里程重新起計。");
       // 本機 UI
       if (els.lastOdometer) {
@@ -7681,6 +7508,11 @@
           appState.fullInterval = p.full_interval;
           appState.lastInterval = p.last_interval;
           els.lastOdometer.value = p.last_odometer == null ? "" : neat(p.last_odometer, 1);
+          if (op.kind === "fillup" && op.payload.fillup) {
+            const r = op.payload.fillup;
+            appState.lastFillupResult = { odometer: Number(r.odometer), distance: Number(r.trip_km),
+              paid: Number(r.paid_amount), measuredInterval: r.full_tank && p.last_interval && p.last_interval.measured ? p.last_interval : null };
+          }
         } else if (op.kind === "consumables") {
           consumState = JSON.parse(JSON.stringify(op.payload.snapshot));
         }
@@ -7979,12 +7811,6 @@
       initAuth();
       initConsumables();
       loadState();
-
-      // 未登入嘅本機舊資料：同樣一次性將基準重設做最新里程
-      if (!appState.user) {
-        const lo = Number(appState.lastOdometer);
-        if (migrateBaselineOnce(Number.isFinite(lo) ? lo : NaN)) saveState();
-      }
 
       if (appState.fuelType === "platinum") {
         setFuelType("platinum");
