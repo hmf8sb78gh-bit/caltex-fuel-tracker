@@ -224,7 +224,8 @@
       flex-direction: column;
       gap: 7px;
       border-color: rgba(255, 255, 255, 0.28);
-      background: linear-gradient(135deg, #ef4444, #f97316);
+      /* 2026-11-01：原本 #ef4444→#f97316 白字只有 2.80–3.76:1，壓深到 4.83–5.18:1 */
+      background: linear-gradient(135deg, #dc2626, #c2410c);
     }
 
     .actual-top {
@@ -235,14 +236,14 @@
     }
 
     .actual-card .k {
-      color: rgba(255, 255, 255, 0.94);
+      color: #ffffff;
       font-weight: 800;
       margin-bottom: 0;
     }
 
     .save-badge {
       background: #ffffff;
-      color: #e23712;
+      color: #b91c1c;   /* 2026-11-01：#e23712 只有 4.39:1，壓深到 6.47:1 */
       font-weight: 900;
       border-radius: 999px;
       padding: 5px 13px;
@@ -251,7 +252,7 @@
     }
 
     .actual-list {
-      color: rgba(255, 255, 255, 0.88);
+      color: #ffffff;
       font-size: var(--fs);
     }
 
@@ -1301,7 +1302,7 @@
     }
 
     body.light .actual-card {
-      background: linear-gradient(135deg, #ef4444, #f97316);
+      background: linear-gradient(135deg, #dc2626, #c2410c);
     }
 
     body.light .result.main {
@@ -1373,6 +1374,29 @@
     body.light .row-del { color: #b91c1c; }
     body.light .row-del { background: rgba(220, 38, 38, 0.1); border-color: rgba(220, 38, 38, 0.4); }
     body.light .notice { background: rgba(254, 226, 226, 0.9); border-color: rgba(220, 38, 38, 0.5); }
+
+    /* ===== 2026-11-01 追加：淺色模式鮮色字／指引字對比不足 ===== */
+    /* 油耗說明（#fbbf24 壓白卡只有 1.67:1） */
+    body.light .interval-line.warn { color: #b45309; }
+    /* 到期提醒「剩 X 日」（#f59e0b 只有 2.15:1） */
+    body.light .dr-days { color: #b45309; }
+    body.light .due-remind-row.dr-soon .dr-days { color: #b91c1c; }
+    body.light .due-remind-row.dr-over .dr-days { color: #7f1d1d; }
+    /* 填表指引（#94a3b8 只有 2.56:1） */
+    body.light input::placeholder { color: #64748b; }
+    /* 鍵盤焦點環（#f97316 只有 2.80:1） */
+    body.light button:focus-visible,
+    body.light summary:focus-visible,
+    body.light .trend-chart [role="button"]:focus-visible { outline-color: #c2410c; }
+    /* 「黃金／白金邊個平」比較結論（3.44:1） */
+    body.light .fuel-compare,
+    body.light .fuel-compare .fc-text { color: #166534 !important; }
+    /* 消耗品「已使用」：改由 data-level 控制，淺色用深色票 */
+    body.light .consum-row .cdist [data-level="ok"] { color: #15803d; }
+    body.light .consum-row .cdist [data-level="near"] { color: #b45309; }
+    body.light .consum-row .cdist [data-level="due"] { color: #b91c1c; }
+    body.light .consum-row .cdist [data-level="over"] { color: #7f1d1d; }
+    body.light .consum-row .cdist [data-level="none"] { color: #64748b; }
 
     /* ===== 消耗品 / 入油記錄入口 / 第二頁 ===== */
     .entry-row {
@@ -1912,6 +1936,13 @@
       align-items: center;
       gap: 7px;
     }
+
+    /* 消耗品「已使用」分級色（深色主題；淺色由 body.light 覆蓋） */
+    .consum-row .cdist [data-level="ok"] { color: #86efac; }
+    .consum-row .cdist [data-level="near"] { color: #f97316; }
+    .consum-row .cdist [data-level="due"] { color: #ef4444; }
+    .consum-row .cdist [data-level="over"] { color: #991b1b; }
+    .consum-row .cdist [data-level="none"] { color: var(--muted); }
 
     /* 迷你「?」變色規則掣 */
     .rule-q {
@@ -4874,6 +4905,9 @@
     let fillupMonthKm = 0;      // 本月累積里程（km）
     let fillupPrevTotal = 0;    // 上月累計實付（HK$）
     let fillupPrevKm = 0;       // 上月累積里程（km）
+    // 2026-11-01：雲端讀取狀態（失敗時唔好顯示 HK$0，會被誤會成記錄清空）
+    let monthTotalsStale = false;   // 上一次讀取失敗，數值係舊嘅
+    let monthTotalsLoaded = false;  // 成功讀取過一次
 
     // 傳入 YYYY-MM，傳返下個月 YYYY-MM（12 月進位到下一年）
     function nextYm(ym) {
@@ -4941,46 +4975,51 @@
 
     function updateMonthTotalLine() {
       const month = parseInt(hkYMD().slice(5, 7), 10); // 香港時區月份
+      // 2026-11-01：讀取失敗時顯示舊值＋「未更新」，未曾讀過就顯示 "--"，唔好顯示 HK$0
+      const known = !monthTotalsStale || monthTotalsLoaded;
+      const staleSuffix = monthTotalsStale && monthTotalsLoaded ? "（未更新）" : "";
+      const monthTotalText = !known ? "--"
+        : fillupMonthTotal > 0 ? "HK$" + neat(fillupMonthTotal, 2) + staleSuffix
+        : monthTotalsStale ? "--" : "HK$0";
+      const monthKmText = !known ? "--"
+        : fillupMonthKm > 0 ? neat(fillupMonthKm, 1) + " km" + staleSuffix
+        : monthTotalsStale ? "--" : "0 km";
 
       // 帳號彈窗入面嘅「X月累計實付」「X月累積里程」框
       const mLabel = document.getElementById("cloudMonthLabel");
       const mVal = document.getElementById("cloudMonthTotal");
       if (mLabel) mLabel.textContent = month + "月累計實付";
-      if (mVal) mVal.textContent = fillupMonthTotal > 0
-        ? "HK$" + neat(fillupMonthTotal, 2)
-        : "HK$0";
+      if (mVal) mVal.textContent = monthTotalText;
 
       const mkLabel = document.getElementById("cloudMonthKmLabel");
       const mkVal = document.getElementById("cloudMonthKm");
       if (mkLabel) mkLabel.textContent = month + "月累積里程";
-      if (mkVal) mkVal.textContent = fillupMonthKm > 0
-        ? neat(fillupMonthKm, 1) + " km"
-        : "0 km";
+      if (mkVal) mkVal.textContent = monthKmText;
 
       // 右邊細字：上個月實付／里程
       const prevMonth = parseInt(prevYm(hkYMD().slice(0, 7)).slice(5, 7), 10);
       const prevTotalEl = document.getElementById("cloudPrevTotal");
       if (prevTotalEl) {
-        prevTotalEl.textContent = prevMonth + "月 HK$" + neat(fillupPrevTotal, 2);
+        prevTotalEl.textContent = prevMonth + "月 HK$" + neat(fillupPrevTotal, 2) + staleSuffix;
       }
       const prevKmEl = document.getElementById("cloudPrevKm");
       if (prevKmEl) {
-        prevKmEl.textContent = prevMonth + "月 " + neat(fillupPrevKm, 1) + " km";
+        prevKmEl.textContent = prevMonth + "月 " + neat(fillupPrevKm, 1) + " km" + staleSuffix;
       }
 
       // 實付金額右上角 badge
       if (els.monthTotalLine) {
-        els.monthTotalLine.textContent = fillupMonthTotal > 0
-          ? month + "月累計 HK$" + neat(fillupMonthTotal, 2)
-          : month + "月暫無記錄";
+        els.monthTotalLine.textContent = !known ? month + "月 --"
+          : fillupMonthTotal > 0 ? month + "月累計 HK$" + neat(fillupMonthTotal, 2) + staleSuffix
+          : monthTotalsStale ? month + "月 --" : month + "月暫無記錄";
       }
 
       // 今次行駛距離右上角 badge
       const mkLine = document.getElementById("monthKmLine");
       if (mkLine) {
-        mkLine.textContent = fillupMonthKm > 0
-          ? month + "月累積 " + neat(fillupMonthKm, 1) + " km"
-          : month + "月暫無記錄";
+        mkLine.textContent = !known ? month + "月 --"
+          : fillupMonthKm > 0 ? month + "月累積 " + neat(fillupMonthKm, 1) + " km" + staleSuffix
+          : monthTotalsStale ? month + "月 --" : month + "月暫無記錄";
       }
     }
 
@@ -5030,35 +5069,41 @@
         fillupMonthKm = localYmKm(ym);
         fillupPrevTotal = localYmTotal(pYm);
         fillupPrevKm = localYmKm(pYm);
+        monthTotalsStale = false;
+        monthTotalsLoaded = true;
         updateMonthTotalLine();
         return;
       }
 
+      const uid = appState.user.id;
       const nxt = nextYm(ym); // 下個月一號，用 lt 就唔會撞「YYYY-MM-31」無效日期
 
       // 先搵上個月1號之前最後一筆，做里程邊界（計月內第一筆嘅跨月距離）
       const { data: beforeRows } = await sb
         .from(FILLUP_TABLE)
         .select("fill_date, odometer, trip_km")
-        .eq("user_id", appState.user.id)
+        .eq("user_id", uid)
         .lt("fill_date", pYm + "-01")
         .order("fill_date", { ascending: false })
         .limit(1);
+      if (!appState.user || appState.user.id !== uid) return;
 
       // 一次過撈上個月＋本月（由上個月一號到下個月一號）
       const { data, error } = await sb
         .from(FILLUP_TABLE)
         .select("id,paid_amount,trip_km,odometer,fill_date,litres")
-        .eq("user_id", appState.user.id)
+        .eq("user_id", uid)
         .gte("fill_date", pYm + "-01")
         .lt("fill_date", nxt + "-01");
+      if (!appState.user || appState.user.id !== uid) return;
 
       if (error) {
-        fillupMonthTotal = localYmTotal(ym);
-        fillupMonthKm = localYmKm(ym);
-        fillupPrevTotal = localYmTotal(pYm);
-        fillupPrevKm = localYmKm(pYm);
+        // 2026-11-01：唔再用空白嘅本機數覆蓋（否則會顯示 HK$0／「本月暫無記錄」，用戶會以為記錄清空）
+        monthTotalsStale = true;
+        console.warn("month totals:", error.message);
       } else {
+        monthTotalsStale = false;
+        monthTotalsLoaded = true;
         const map = new Map((data || []).map((r) => [r.id, r]));
         pendingOperations().filter((op) => op.kind === "fillup").forEach((op) => {
           if (!map.has(op.id)) map.set(op.id, Object.assign({id:op.id}, op.payload.fillup));
@@ -5104,8 +5149,9 @@
       const rows = data.slice().sort((a, b) => String(a.fill_date).localeCompare(String(b.fill_date)) || Number(a.odometer) - Number(b.odometer));
       const latest = rows[rows.length - 1];
       const previous = rows[rows.length - 2];
-      const distance = previous && Number(previous.odometer) > 0 && Number(latest.odometer) > Number(previous.odometer)
-        ? Number(latest.odometer) - Number(previous.odometer) : Number(latest.trip_km);
+      // 2026-11-01：改用同一個 resolveFillupDistance 口徑（之前自己用 odometer 差，
+      // 會同「入油記錄／月圖／趨勢」計出兩個唔同嘅距離）
+      const distance = resolveFillupDistance(latest, previous ? previous.odometer : null).km;
       appState.lastFillupResult = {
         odometer: Number(latest.odometer), distance: distance > 0 ? distance : NaN,
         paid: latest.paid_amount == null ? NaN : Number(latest.paid_amount)
@@ -5373,7 +5419,10 @@
         const fuBtn = e.target.closest ? e.target.closest("[data-del-fillup]") : null;
         if (fuBtn) { runButtonTask(fuBtn, () => deleteFillup(fuBtn.getAttribute("data-del-fillup"))); return; }
         const rpBtn = e.target.closest ? e.target.closest("[data-del-repair]") : null;
-        if (rpBtn) { runButtonTask(rpBtn, () => deleteRepair(rpBtn.getAttribute("data-del-repair"))); }
+        if (rpBtn) { runButtonTask(rpBtn, () => deleteRepair(rpBtn.getAttribute("data-del-repair"))); return; }
+        // 2026-11-01：消耗品更換歷史刪除
+        const hiBtn = e.target.closest ? e.target.closest("[data-del-history]") : null;
+        if (hiBtn) { runButtonTask(hiBtn, () => deleteConsumHistory(hiBtn.getAttribute("data-del-history"))); }
       });
 
       // 只處理最上層彈窗；所有入口共用 Esc、焦點循環。
@@ -5786,6 +5835,13 @@
     // 左邊：長期顯示「已使用」
     // － 電池：日期制，顯示由更換日期到而家幾耐
     // － 其他：max(入油總里程, 該項自己嘅輸入里程) − 該項上次更換里程，並按門檻變色
+    // 2026-11-01：消耗品「已使用」改用 data-level 分級（原本 inline 淺綠喺淺色主題只有 1.26:1）
+    function setConsumLevel(el, level) {
+      if (!el) return;
+      el.dataset.level = level;
+      el.style.color = "";
+    }
+
     function updateConsumUsage(id) {
       const el = document.querySelector('[data-distance="' + id + '"]');
       if (!el) return;
@@ -5793,34 +5849,34 @@
       const input = document.querySelector('[data-input="' + id + '"]');
       const saved = consumState.km[id];
 
-      // 預設顏色（淺綠），下面按門檻覆蓋
-      el.style.color = "#86efac";
+      // 預設級別（正常），下面按門檻覆蓋
+      setConsumLevel(el, "ok");
 
       // ===== 電池：日期制 =====
       if (item && item.dateBased) {
         const dateStr = (input && input.value) || saved;
         if (!dateStr) {
           el.textContent = "已使用：未記錄";
-          el.style.color = "var(--muted)";
+          setConsumLevel(el, "none");
           return;
         }
         const text = elapsedSince(dateStr);
         el.textContent = "已使用：" + (text || "--");
 
-        // 電池變色：3年橙、4年紅、5年深紅
+        // 電池變色：3年橙、4年紅、5年深紅（同時加文字等級）
         const m = elapsedMonths(dateStr);
-        if (m >= 60) el.style.color = "#991b1b";      // 深紅（≥5年）
-        else if (m >= 48) el.style.color = "#ef4444"; // 紅（≥4年）
-        else if (m >= 36) el.style.color = "#f97316"; // 橙（≥3年）
-        else el.style.color = "#86efac";              // 預設淺綠
+        if (m >= 60) { setConsumLevel(el, "over"); el.textContent += " · 盡快更換"; }
+        else if (m >= 48) { setConsumLevel(el, "due"); el.textContent += " · 建議更換"; }
+        else if (m >= 36) { setConsumLevel(el, "near"); el.textContent += " · 接近更換"; }
+        else setConsumLevel(el, "ok");
         return;
       }
 
       // ===== 其他：公里制 =====
       const last = Number(saved);
-      if (saved === undefined || saved === "" || !Number.isFinite(last)) {
+      if (saved === undefined || saved === null || saved === "" || !Number.isFinite(last)) {
         el.textContent = "已使用：未記錄";
-        el.style.color = "var(--muted)";
+        setConsumLevel(el, "none");
         return;
       }
 
@@ -5833,6 +5889,7 @@
 
       if (base == null) {
         el.textContent = "已使用：--";
+        setConsumLevel(el, "none");
         return;
       }
 
@@ -5842,13 +5899,16 @@
       void el.offsetWidth;
       el.classList.add("used-pop");
 
-      // 按門檻變色
+      // 按門檻分級（2026-11-01：改用 data-level + 文字等級，唔再只靠顏色）
       const th = CONSUM_THRESHOLDS[id];
+      let level = "ok";
       if (th) {
-        if (used >= th.darkred) el.style.color = "#991b1b";      // 深紅
-        else if (used >= th.red) el.style.color = "#ef4444";     // 紅
-        else if (used >= th.orange) el.style.color = "#f97316";  // 橙
+        if (used >= th.darkred) level = "over";       // 深紅
+        else if (used >= th.red) level = "due";       // 紅
+        else if (used >= th.orange) level = "near";   // 橙
       }
+      setConsumLevel(el, level);
+      if (level !== "ok") el.textContent += " · " + ({ near: "接近更換", due: "建議更換", over: "盡快更換" })[level];
     }
 
     function renderConsumables() {
@@ -7486,17 +7546,36 @@
         box.setAttribute("role", "status"); box.setAttribute("aria-live", "polite");
         const anchor = document.getElementById("syncLine"); if (anchor) anchor.after(box);
       }
-      const count = pendingOperations().length;
-      box.textContent = !appState.user ? "登入後會繼續補傳待同步記錄。" : count
-        ? "待同步 " + count + " 筆 · " + (syncInFlight ? "正在補傳…" : "已保存在此裝置，連線後自動補傳") + (lastSyncError ? "（" + lastSyncError + "）" : "")
-        : "所有已儲存記錄已同步 ✓";
+      const uid = appState.user && appState.user.id;
+      const operations = pendingOperations();
+      const count = operations.length;
+      const blocked = operations.filter((r) => r.blocked);
+      const firstError = blocked.length ? String(blocked[0].last_error || "資料格式有問題").slice(0, 70) : "";
+      box.textContent = !appState.user ? "登入後會繼續補傳待同步記錄。"
+        : blocked.length
+          ? "⚠ 有 " + blocked.length + " 筆未能同步（" + firstError + "）· 已暫存此裝置 · 另外 " + (count - blocked.length) + " 筆待同步"
+          : count
+            ? "待同步 " + count + " 筆 · " + (syncInFlight ? "正在補傳…" : "已保存在此裝置，連線後自動補傳") + (lastSyncError ? "（" + lastSyncError + "）" : "")
+            : "所有已儲存記錄已同步 ✓";
       let main = document.getElementById("pendingSyncMain");
       if (!main) { main = document.createElement("div"); main.id = "pendingSyncMain"; main.className = "sync-line"; main.setAttribute("role","status");
         const footer = document.getElementById("footerInfo"); if (footer) footer.before(main); }
-      main.textContent = appState.user && count ? "待同步 " + count + " 筆 · 已存此裝置，連線後自動補傳" : "";
-      if (count && !syncInFlight) {
+      main.textContent = appState.user && count
+        ? (blocked.length
+            ? "⚠ 有 " + blocked.length + " 筆未能同步，請撳「重試受阻記錄」；資料仍保存在此裝置"
+            : "待同步 " + count + " 筆 · 已存此裝置，連線後自動補傳")
+        : "";
+      if (count && !syncInFlight && uid) {
         const button = document.createElement("button"); button.type = "button"; button.className = "retry-mini";
-        button.textContent = "立即重試"; button.onclick = () => flushPending(); box.appendChild(button);
+        button.textContent = blocked.length ? "重試受阻記錄" : "立即重試";
+        button.onclick = () => {
+          if (blocked.length) {
+            const rows = pendingOperations(uid).map((r) => r.blocked ? Object.assign({}, r, { blocked: false, attempts: 0 }) : r);
+            try { writePending(uid, rows); } catch (e) {}
+          }
+          flushPending();
+        };
+        box.appendChild(button);
       }
     }
     function applyPendingState() {
@@ -7519,6 +7598,21 @@
       }
       saveState(); saveConsumState(); renderConsumables(); calculate(false); renderPendingStatus();
     }
+    // 2026-11-01：分辨「暫時性網絡錯誤」同「資料本身有問題」，
+    // 令一筆永遠失敗嘅操作唔會再卡死成條同步隊列。
+    function isTransientSyncError(e) {
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+      const msg = String((e && (e.message || e.error_description || e.details)) || e || "");
+      if (/Failed to fetch|NetworkError|network error|timeout|timed out|Load failed|fetch/i.test(msg)) return true;
+      const raw = e && (e.code != null ? e.code : e.status);
+      const code = raw == null ? "" : String(raw);
+      if (/^(408|425|429|5\d\d)$/.test(code)) return true;
+      return false;
+    }
+    function syncErrorMessage(e) {
+      const msg = String((e && (e.message || e.error_description || e.details)) || e || "");
+      return msg.replace(/\s+/g, " ").trim().slice(0, 80) || "未知錯誤";
+    }
     async function flushPending() {
       if (syncInFlight || !sb || !appState.user) return false;
       const uid = appState.user.id;
@@ -7526,13 +7620,34 @@
       let changed = false;
       try {
         while (appState.user && appState.user.id === uid) {
-          const op = pendingOperations(uid)[0]; if (!op) break;
+          const rows = pendingOperations(uid);
+          const index = rows.findIndex((r) => !r.blocked);
+          if (index < 0) break;
+          const op = rows[index];
           if (op.uid !== uid) throw new Error("帳號不一致，停止補傳。");
           const { error } = await sb.rpc("sync_tracker_operation", { operation_id: op.id, kind: op.kind, payload: op.payload });
-          if (error) throw error;
-          writePending(uid, pendingOperations(uid).filter((r) => r.id !== op.id)); changed = true;
+          if (!appState.user || appState.user.id !== uid) break;
+          if (error) {
+            const attempts = Number(op.attempts || 0) + 1;
+            const next = rows.slice();
+            if (isTransientSyncError(error) && attempts < 6) {
+              // 網絡問題：記低次數，停手等下次自動重試
+              next[index] = Object.assign({}, op, { attempts, last_error: syncErrorMessage(error) });
+              writePending(uid, next);
+              throw error;
+            }
+            // 資料問題（或重試太多次）：標記受阻，跳過呢筆繼續送後面，唔好卡死隊列
+            next[index] = Object.assign({}, op, { attempts, last_error: syncErrorMessage(error), blocked: true });
+            writePending(uid, next);
+            console.warn("pending op blocked:", op.kind, syncErrorMessage(error));
+            continue;
+          }
+          writePending(uid, rows.filter((r) => r.id !== op.id)); changed = true;
         }
-      } catch (e) { lastSyncError = "暫未連上雲端，稍後重試"; console.warn("pending sync:", e.message); }
+      } catch (e) {
+        lastSyncError = isTransientSyncError(e) ? "暫時連唔到雲端，稍後自動重試" : "同步受阻：" + syncErrorMessage(e);
+        console.warn("pending sync:", e && e.message);
+      }
       finally { syncInFlight = false; renderPendingStatus(); }
       if (changed && appState.user && appState.user.id === uid) {
         await Promise.all([loadFillupsForPage(), cloudLoadMonthTotal(), loadConsumHistory(), loadRepairs(), loadDues()]);
@@ -7561,15 +7676,35 @@
       });
       return [...map.values()];
     }
+    // 2026-11-01：消耗品更換歷史可以刪（之前只加不減，打錯使費會永久計錯月／年開支）
+    async function deleteConsumHistory(id) {
+      if (id == null || id === "") return;
+      const uid = appState.user && appState.user.id;
+      if (!sb || !uid) { alert("請先登入再刪除更換記錄。"); return; }
+      const pending = pendingOperations().some((op) => op.kind === "consumables" &&
+        (op.payload.history || []).some((h) => String(h.id) === String(id)));
+      if (pending) { alert("呢筆更換記錄待同步，請同步完成後再刪除。"); return; }
+      if (!window.confirm("確定刪除呢筆更換記錄？（會同時扣返月／年開支）")) return;
+      const { error } = await sb.from(HISTORY_TABLE).delete().eq("id", id).eq("user_id", uid);
+      if (error) { alert("刪除失敗：" + error.message); return; }
+      if (uid !== (appState.user && appState.user.id)) return;
+      await loadConsumHistory();
+      if (uid !== (appState.user && appState.user.id)) return;
+      renderConsumHistory();
+      renderExpenseSummary();
+      showToast("已刪除更換記錄");
+    }
+
     function renderConsumHistory() {
       let box = document.getElementById("consumHistory");
       if (!box) { box = document.createElement("div"); box.id = "consumHistory"; document.getElementById("consumSyncLine").after(box); }
       const rows = consumHistoryRows().sort((a,b) => String(b.replacement_date).localeCompare(String(a.replacement_date)));
       box.innerHTML = '<h3 style="font-size:1rem">更換歷史</h3>' + (rows.length ? rows.map((r) => {
         const item = CONSUMABLES.find((c) => c.id === r.item_id);
+        const del = r.pending ? "" : '<button type="button" class="row-del" data-del-history="' + String(r.id) + '">刪</button>';
         return '<div class="rp-row"><div class="rp-item">' + escHtml(item ? item.name : r.item_id) +
           '<div class="fu-sub">' + escHtml(r.replacement_date) + (r.mileage != null ? ' · ' + neat(Number(r.mileage),1) + ' km' : '') +
-          (r.legacy ? ' · 舊記錄（月份）' : '') + (r.pending ? ' · 待同步' : '') + '</div></div><span class="rp-km">HK$' + neat(Number(r.cost),2) + '</span></div>';
+          (r.legacy ? ' · 舊記錄（月份）' : '') + (r.pending ? ' · 待同步' : '') + '</div></div><span class="rp-km">HK$' + neat(Number(r.cost),2) + '</span>' + del + '</div>';
       }).join('') : '<div class="rp-empty">儲存更換記錄後會顯示；每次更換都會保留。</div>');
     }
     window.addEventListener("online", () => flushPending());
