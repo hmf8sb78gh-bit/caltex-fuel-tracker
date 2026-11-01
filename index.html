@@ -357,7 +357,8 @@
       input,
       select,
       textarea {
-        font-size: 16px !important;
+        /* 2026-11-01：唔再鎖死 16px，跟隨「字體大小」設定，同時保持唔會細過 16px（iOS 唔會自動 zoom） */
+        font-size: max(16px, 1em) !important;
       }
     }
 
@@ -436,6 +437,25 @@
 
     .input-warn:empty {
       display: none;
+    }
+
+    /* 2026-11-01：出錯欄位加紅框（唔再只係最尾一段紅字） */
+    .field-invalid {
+      border-color: #dc2626 !important;
+      box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.18) !important;
+    }
+
+    /* 讀屏專用（視覺上隱藏） */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+      border: 0;
     }
 
     .input-warn {
@@ -821,7 +841,8 @@
       display: flex;
       align-items: flex-end;
       justify-content: center;
-      padding: 14px;
+      /* 2026-11-01：iPhone 底部安全區（Home Indicator／工具列）唔好遮住按鈕 */
+      padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
     }
 
     @media (min-width: 680px) {
@@ -832,7 +853,9 @@
 
     .modal-panel {
       width: min(560px, 100%);
+      /* 2026-11-01：用 dvh 跟住 iPhone 工具列／鍵盤實際可視高度，舊機會忽略 */
       max-height: 88vh;
+      max-height: 88dvh;
       overflow-y: auto;
       margin: 0;
       border-radius: 24px;
@@ -1235,6 +1258,12 @@
     .dr-days { font-weight: 800; color: #f59e0b; white-space: nowrap; }
     .due-remind-row.dr-soon .dr-days { color: #ef4444; }
     .due-remind-row.dr-over .dr-days { color: #b91c1c; }
+
+    /* 2026-11-01：到期頁倒數標籤 */
+    .due-countdown { font-weight: 800; white-space: nowrap; }
+    .due-countdown.ok { color: var(--muted); }
+    .due-countdown.soon { color: #b45309; }
+    .due-countdown.over { color: #b91c1c; }
     .due-line {
       display: flex;
       align-items: center;
@@ -2650,7 +2679,13 @@
         <!-- 第一重 -->
         <div id="wipeStep1">
           <p class="wipe-text">
-            將會永久刪除你帳號喺雲端嘅<strong>全部</strong>資料，包括：上次入油總公里數、上次每公里油費、每月累計實付／里程、所有入油記錄，以及全部消耗品更換記錄。
+            將會永久刪除你帳號喺雲端嘅<strong>全部</strong>資料，包括以下 <strong>6 類</strong>：<br />
+            ① 上次入油總公里數、上次每公里油費、滿缸油耗進度<br />
+            ② 每月累計實付／里程<br />
+            ③ 所有入油記錄<br />
+            ④ 全部消耗品更換記錄同使費<br />
+            ⑤ 所有維修記錄<br />
+            ⑥ 牌費、保險、驗車、港車北上、港北保險、停車場繳費記錄
           </p>
           <p class="wipe-text warn-text">刪除後無法還原。</p>
           <div class="auth-buttons">
@@ -2814,6 +2849,7 @@
 
     <!-- 計算結果：撳「計算」先彈出 -->
     <section class="card hidden" id="resultSection">
+      <div id="calcAnnounce" class="sr-only" role="status" aria-live="polite"></div>
       <h2>計算結果</h2>
 
       <div class="fuel-pill actual-card actual-result">
@@ -3480,18 +3516,42 @@
     }
 
     // 輸入防呆：檢查升數、里程係咪合理，傳返警告字（空字串＝冇問題）
+    // 2026-11-01：驗證時逐個欄位標紅框＋aria-invalid，唔再只係最尾一段紅字
+    const VALIDATED_INPUT_IDS = ["litres", "lastOdometer", "currentOdometer", "discountCard", "customDiscount", "voucher", "customVoucher", "otherPrice"];
+    function clearFieldInvalid() {
+      VALIDATED_INPUT_IDS.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove("field-invalid");
+        el.removeAttribute("aria-invalid");
+      });
+    }
+    function markFieldInvalid(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add("field-invalid");
+      el.setAttribute("aria-invalid", "true");
+    }
+
     function validateInputs() {
       const litres = els.litres.value.trim() === "" ? NaN : Number(els.litres.value);
       const last = els.lastOdometer.value.trim() === "" ? NaN : Number(els.lastOdometer.value);
       const current = els.currentOdometer.value.trim() === "" ? NaN : Number(els.currentOdometer.value);
       const msgs = [];
+      const invalid = [];
 
-      if (Number.isFinite(litres) && litres < 0) msgs.push("入油量唔可以係負數。");
-      if (Number.isFinite(current) && current < 0) msgs.push("總里程唔可以係負數。");
+      if (Number.isFinite(litres) && litres < 0) { msgs.push("入油量唔可以係負數。"); invalid.push("litres"); }
+      if (Number.isFinite(litres) && litres > 200) { msgs.push("入油量超過 200 升，請檢查係咪打多咗個 0。"); invalid.push("litres"); }
+      if (Number.isFinite(current) && current < 0) { msgs.push("總里程唔可以係負數。"); invalid.push("currentOdometer"); }
       if (Number.isFinite(last) && Number.isFinite(current) && current < last) {
         msgs.push("今次總里程(" + neat(current, 1) + ")細過上次(" + neat(last, 1) + ")，請檢查。");
+        invalid.push("currentOdometer");
       }
-      if (Number.isFinite(current) && current > 9999999) msgs.push("總里程數值異常偏大，請檢查。");
+      if (Number.isFinite(last) && Number.isFinite(current) && current > last && current - last > 2000) {
+        msgs.push("今次行駛距離超過 2,000 公里，請檢查總里程有冇打錯。");
+        invalid.push("currentOdometer");
+      }
+      if (Number.isFinite(current) && current > 9999999) { msgs.push("總里程數值異常偏大，請檢查。"); invalid.push("currentOdometer"); }
 
       const pump = getCurrentPumpPrice();
       if (!appState.otherBrand) {
@@ -3499,11 +3559,22 @@
         const voucher = getVoucherAmount();
         if (!Number.isFinite(discount) || discount < 0 || (pump > 0 && discount >= pump)) {
           msgs.push("每升折扣必須係非負數，並細過牌價。");
+          invalid.push(els.discountCard.value === "custom" ? "customDiscount" : "discountCard");
         }
         if (!Number.isFinite(voucher) || voucher < 0 || voucher > VOUCHER_STEP) {
           msgs.push("油券面值必須介乎 0 同 HK$350。");
+          invalid.push(els.voucher.value === "custom" ? "customVoucher" : "voucher");
+        }
+      } else {
+        const manual = numberValue(document.getElementById("otherPrice"), NaN);
+        if (!Number.isFinite(manual) || manual <= 0) {
+          msgs.push("請輸入其他油站嘅牌價。");
+          invalid.push("otherPrice");
         }
       }
+
+      clearFieldInvalid();
+      invalid.forEach(markFieldInvalid);
       const text = msgs.join(" ");
       if (els.inputWarn) els.inputWarn.textContent = text;
       return text;
@@ -3744,7 +3815,12 @@
     function getSingleFillupView(values) {
       const active = !!els.currentOdometer.value.trim();
       const saved = appState.lastFillupResult;
-      if (!active && saved && saved.odometer === numberValue(els.lastOdometer, NaN)) {
+      // 2026-11-01：里程顯示會四捨五入到 1 位小數，所以用容差比對，
+      // 唔好再用 === （否則入過 2 位小數之後，距離／每公里會變「--」）
+      const savedOdo = saved ? Number(saved.odometer) : NaN;
+      const shownOdo = numberValue(els.lastOdometer, NaN);
+      if (!active && saved && Number.isFinite(savedOdo) && Number.isFinite(shownOdo) &&
+          Math.abs(savedOdo - shownOdo) < 0.06) {
         return { distance: saved.distance, paid: saved.paid, saved: true };
       }
       return { distance: getDistanceKm(), paid: values.payable, saved: false };
@@ -3850,14 +3926,16 @@
       updateMonthTotalLine();
       updateEntryDot();
 
-      if ((!Number.isFinite(values.pumpPrice) || values.pumpPrice <= 0) && !single.saved) {
+      const noPrice = !Number.isFinite(values.pumpPrice) || values.pumpPrice <= 0;
+      const noLitres = !(values.litres > 0); // 2026-11-01：未輸入油量唔好顯示 HK$0
+      if ((noPrice || noLitres) && !single.saved) {
         els.resultPay.textContent = "--";
         els.resultCostPerKm.textContent = "--";
         els.resultDistanceKm.textContent = Number.isFinite(distanceKm)
           ? neat(distanceKm, 1) + " km"
           : "--";
         els.resultFuelConsumption.textContent = "--";
-        els.updatedAtText.textContent = "尚未載入有效油價。";
+        els.updatedAtText.textContent = noPrice ? "尚未載入有效油價。" : "請輸入今次入油量（升）先計得錢。";
         updateFooterTime();
         saveState();
 
@@ -3867,6 +3945,16 @@
 
       const costPerKm = distanceKm > 0 && Number.isFinite(single.paid) ? single.paid / distanceKm : NaN;
       const kmPerLitre = intervalView.kmL;
+
+      // 2026-11-01：讀屏用嘅計算結果摘要（視覺上隱藏）
+      const announce = typeof document !== "undefined" ? document.getElementById("calcAnnounce") : null;
+      if (announce && shouldScroll) {
+        announce.textContent = "計算結果：" +
+          (Number.isFinite(single.paid) ? "實付 " + money(single.paid) : "實付 --") +
+          (distanceKm > 0 ? "，行駛 " + neat(distanceKm, 1) + " 公里" : "") +
+          (Number.isFinite(costPerKm) ? "，每公里 " + money(costPerKm) : "") +
+          (Number.isFinite(kmPerLitre) ? "，油耗 " + neat(kmPerLitre, 2) + " 公里每升" : "，油耗暫未能計算");
+      }
 
       // 結果區淨係撳「計算」先彈出（calcBtn 會 remove hidden）；淨輸入唔強行展開
       // 四個數一律跳字：實付、每公里、距離、油耗；撳計算先播動畫（延遲少少等卡滑入），輸入緊就靜默更新
@@ -4637,6 +4725,7 @@
 
       if (!appState.user || appState.user.id !== requestUid) return;
       if (error) {
+        cloudReadFailed = true;
         setSyncLine("雲端讀取失敗：" + error.message);
         return;
       }
@@ -4763,6 +4852,12 @@
       try { localStorage.removeItem(FILLUP_KEY); } catch (e) {}
       try { localStorage.removeItem(REPAIR_KEY); } catch (e) {}
       try { localStorage.removeItem(DUES_KEY); } catch (e) {}
+      // 2026-11-01：連開支趨勢本機快取都清，否則清除後離線一睇會彈返已刪資料
+      try {
+        Object.keys(localStorage)
+          .filter((k) => k.indexOf("caltexExpenseTrendV1") === 0)
+          .forEach((k) => { try { localStorage.removeItem(k); } catch (e) {} });
+      } catch (e) {}
       repairsCache = [];
       duesCache = [];
       fillupMonthTotal = 0;
@@ -4836,7 +4931,9 @@
         sb.from(HISTORY_TABLE).delete().eq("user_id", uid),
         sb.from(FILLUP_TABLE).delete().eq("user_id", uid),
         sb.from(REPAIR_TABLE).delete().eq("user_id", uid),
-        sb.from(DUES_TABLE).delete().eq("user_id", uid)
+        sb.from(DUES_TABLE).delete().eq("user_id", uid),
+        // 2026-11-01：同步去重帳本都要清（否則伺服器仲留低操作紀錄）
+        sb.from("tracker_sync_operations").delete().eq("user_id", uid)
       ];
       const results = await Promise.all(tasks);
       const errs = results.map((r) => r.error).filter(Boolean);
@@ -4874,18 +4971,42 @@
       }
     }
 
+    // 2026-11-01：雲端讀取狀態。讀取失敗時唔可以當成「新帳號第一次」，否則會漏帳。
+    let cloudReadFailed = false;
+    let cloudAccountReady = false;
+    let retryAccountLoad = null;   // 由 initAuth 設定：載入失敗後可以再試
+
     function initAuth() {
       if (!sb) { appState.authReady = true; renderPendingStatus(); return; }
       let loadedUid = null;
+      let accountLoadingUid = null;
       async function loadAccount(uid) {
-        await Promise.all([cloudLoadRecord(), cloudLoadConsum(), cloudLoadPriceHist(), loadRepairs(), loadDues(), loadConsumHistory(), loadFillupsForPage()]);
-        if (!appState.user || appState.user.id !== uid) return;
-        applyPendingState();
-        await reconcileFromCloud();
-        await flushPending();
-        await cloudLoadMonthTotal();
-        checkDuesReminders();
+        if (!uid || accountLoadingUid === uid) return;   // 同一帳號唔重複載入（換帳號可以即刻載入新嗰個）
+        accountLoadingUid = uid;
+        try {
+          cloudReadFailed = false; cloudAccountReady = false;
+          await Promise.all([cloudLoadRecord(), cloudLoadConsum(), cloudLoadPriceHist(), loadRepairs(), loadDues(), loadConsumHistory(), loadFillupsForPage()]);
+          if (!appState.user || appState.user.id !== uid) return;
+          cloudAccountReady = !cloudReadFailed;
+          applyPendingState();
+          await reconcileFromCloud();
+          await flushPending();
+          await cloudLoadMonthTotal();
+          checkDuesReminders();
+        } finally {
+          if (accountLoadingUid === uid) accountLoadingUid = null;
+          renderPendingStatus();
+        }
       }
+      // 2026-11-01：網絡返嚟就自動再試一次未完成嘅雲端載入（否則會一直存唔到）
+      window.addEventListener("online", () => {
+        if (appState.user && !cloudAccountReady) loadAccount(appState.user.id).catch(() => {});
+      });
+      retryAccountLoad = (uid) => {
+        const id = uid || (appState.user && appState.user.id);
+        if (!id) return;
+        loadAccount(id).catch(() => {});   // 唔好留 unhandled rejection
+      };
       sb.auth.onAuthStateChange((event, session) => {
         const user = session && session.user;
         if (user) {
@@ -4896,7 +5017,8 @@
             setTimeout(() => loadAccount(user.id).catch((e) => setSyncLine("讀取未完成，請重新整理：" + e.message)), 0);
           }
         } else {
-          loadedUid = null; appState.user = null; clearLocalRecords(); historyCache = []; renderAuth();
+          loadedUid = null; appState.user = null; cloudAccountReady = false; cloudReadFailed = false;
+          clearLocalRecords(); historyCache = []; renderAuth();
         }
         appState.authReady = true; syncViewFromHash(); renderPendingStatus();
       });
@@ -5220,6 +5342,15 @@
         (!appState.fullInterval || !appState.fullInterval.open) &&
         (!fillupsListCache || !fillupsListCache.length) &&
         !loadLocalFillups().length;
+      // 2026-11-01：雲端未確認載入完成時，唔好誤判成「第一次」而漏記入油記錄
+      if (firstBaseline && typeof cloudAccountReady !== "undefined" && !cloudAccountReady) {
+        // 順手再試一次載入，唔好只叫用戶「等」
+        if (typeof retryAccountLoad === "function") {
+          try { retryAccountLoad(appState.user && appState.user.id); } catch (e) {}
+        }
+        showStatus("雲端記錄仲未載入完成，正在自動再試。請 3 秒後再撳「儲存」；如果一直唔得，請重新整理頁面（唔會漏咗你之前嘅記錄）。");
+        return;
+      }
       if (firstBaseline) {
         appState.fullInterval = { open: true, startOdo: current, litres: 0, paid: 0, baselineV2: true, startFull: !!(els.fullTankChk && els.fullTankChk.checked), volumeComplete: true };
         if (els.fullTankChk) els.fullTankChk.checked = false;
@@ -5812,10 +5943,14 @@
           : "現時總里程：未填（登入自動填入）";
       }
       // 帳號彈窗果個「現時總里程」一齊即時更新（防遞迴）
+      // 2026-11-01：彈窗關住就唔使重繪（會連帶 4 個雲端查詢），避免打字時連環請求
       if (els && els.cloudCurrentMileage && !updateConsumCurrentLine._busy) {
-        updateConsumCurrentLine._busy = true;
-        renderCloudRecord();
-        updateConsumCurrentLine._busy = false;
+        const authModal = document.getElementById("authModal");
+        if (authModal && !authModal.classList.contains("hidden")) {
+          updateConsumCurrentLine._busy = true;
+          renderCloudRecord();
+          updateConsumCurrentLine._busy = false;
+        }
       }
     }
 
@@ -5896,6 +6031,12 @@
       }
 
       const used = base - last;
+      // 2026-11-01：上次更換里程大過現時里程（打錯／換錶）唔好再顯示負數
+      if (used < 0) {
+        el.textContent = "已使用：上次更換里程大過現時里程，請檢查";
+        setConsumLevel(el, "none");
+        return;
+      }
       el.textContent = "已使用：" + neat(used, 1) + " 公里";
       el.classList.remove("used-pop");
       void el.offsetWidth;
@@ -5947,9 +6088,11 @@
         list.appendChild(row);
 
         // 輸入時即時更新全部已使用＋現時總里程，真正儲存要撳底部「儲存」掣
+        // 2026-11-01：打字時只即時更新畫面上嘅數字；貴嘅重算（會查雲端）用 400ms debounce
         row.querySelector("input").addEventListener("input", () => {
-          refreshAllConsumSince();
-          cloudSyncOdometerDebounced();
+          updateConsumUsage(item.id);
+          updateConsumCurrentLine();
+          scheduleConsumRefresh();
         });
 
         renderConsumLast(item.id);
@@ -6022,6 +6165,16 @@
       updateConsumCurrentLine();
       CONSUMABLES.forEach((it) => updateConsumUsage(it.id));
       updateEntryDot();
+    }
+
+    // 2026-11-01：打字時唔好逐個字連環打雲端請求
+    let consumRefreshTimer = null;
+    function scheduleConsumRefresh() {
+      clearTimeout(consumRefreshTimer);
+      consumRefreshTimer = setTimeout(() => {
+        refreshAllConsumSince();
+        cloudSyncOdometerDebounced();
+      }, 400);
     }
 
     // 撳「儲存」先將所有輸入寫入記錄（本機 + 雲端）
@@ -6260,7 +6413,7 @@
             odo: Number(r.odometer) || 0,
             fuel: r.fuel_type, litres: r.litres, pumpPrice: r.pump_price, cardDiscount: r.card_discount, voucherValue: r.voucher_value, voucherSheets: r.voucher_sheets, fullTank: r.full_tank
           }));
-        } else { rows = fillupsListCache.slice(); }
+        } else { rows = fillupsListCache.slice(); cloudReadFailed = true; }
       } else {
         rows = loadLocalFillups().map((r) => ({
           id: r.id,
@@ -6658,6 +6811,13 @@
       if (!item || !Number.isFinite(km) || km < 0 || !Number.isFinite(cost) || cost < 0) {
         setRepairSync("請填維修項目；里程同使費必須係非負數。"); return;
       }
+      // 2026-11-01：加上限，避免打多個 0 令月／年開支爆數
+      if (cost > 1000000) { setRepairSync("使費超過 HK$1,000,000，請檢查係咪打多咗個 0。"); return; }
+      if (km > 10000000) { setRepairSync("維修里程數值異常偏大，請檢查。"); return; }
+      const curKmForRepair = currentConsumKm();
+      if (km > 0 && Number.isFinite(curKmForRepair) && curKmForRepair > 0 && km > curKmForRepair + 10000) {
+        setRepairSync("維修里程比現時總里程大好多，請檢查係咪打錯。"); return;
+      }
       const date = document.getElementById("repairYearSel").value + "-" + document.getElementById("repairMonthSel").value + "-01";
       const op = makeOperation("repair", { repair_date: date, item, mileage: km || null, cost: Number(cost.toFixed(2)) });
       enqueueOperation(op);
@@ -6720,13 +6880,13 @@
 
       if (sb && appState.user) {
         const [f, r] = await Promise.all([
-          readAccountRows(FILLUP_TABLE,"fill_date,paid_amount,trip_km,fuel_type,litres,pump_price,card_discount,voucher_value,voucher_sheets,full_tank","fill_date",uid),
+          readAccountRows(FILLUP_TABLE,"fill_date,paid_amount,trip_km,odometer,fuel_type,litres,pump_price,card_discount,voucher_value,voucher_sheets,full_tank","fill_date",uid),
           readAccountRows(REPAIR_TABLE,"repair_date,item,mileage,cost","repair_date",uid)
         ]);
         if (!appState.user || appState.user.id !== uid) throw new Error("帳號已變更，請重新匯出。");
         if (f.error || r.error) throw new Error("讀取記錄失敗，未有匯出；請連線後重試。");
         fills = f.error ? loadLocalFillups() : (f.data || []).map((x) => ({
-          date: x.fill_date, paid: Number(x.paid_amount) || 0, km: Number(x.trip_km) || 0, fuel: x.fuel_type, litres:x.litres, pumpPrice:x.pump_price, cardDiscount:x.card_discount, voucherValue:x.voucher_value, voucherSheets:x.voucher_sheets, fullTank:x.full_tank
+          date: x.fill_date, paid: Number(x.paid_amount) || 0, km: Number(x.trip_km) || 0, odo: Number(x.odometer) || 0, fuel: x.fuel_type, litres:x.litres, pumpPrice:x.pump_price, cardDiscount:x.card_discount, voucherValue:x.voucher_value, voucherSheets:x.voucher_sheets, fullTank:x.full_tank
         }));
         repairs = r.error ? loadLocalRepairs() : (r.data || []).map((x) => ({
           date: x.repair_date, item: x.item || "", km: Number(x.mileage) || 0, cost: Number(x.cost) || 0
@@ -6737,39 +6897,86 @@
       }
 
       const lines = [];
-      const fillSorted = fills.slice().sort((a, b) => (a.date < b.date ? 1 : -1));
+      // 2026-11-01：里程改用同畫面一樣嘅 resolveFillupDistance；數值欄唔加 HK$／km（Excel 加得到數）
+      const fillAsc = fills.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)) || (Number(a.odo) || 0) - (Number(b.odo) || 0));
+      let prevOdoForCsv = NaN;
+      const fillResolved = fillAsc.map((x) => {
+        // 同畫面一樣：odometer 冇值要傳 null（傳 0 會令 resolveFillupDistance 回 null）
+        const odoNum = Number(x.odo);
+        const km = resolveFillupDistance({ odometer: odoNum > 0 ? odoNum : null, trip_km: x.km, litres: x.litres }, prevOdoForCsv).km;
+        if (Number.isFinite(odoNum) && odoNum > 0) prevOdoForCsv = odoNum;
+        return Object.assign({}, x, { resolvedKm: km });
+      });
+      const fillSorted = fillResolved.slice().reverse();
       const repairSorted = repairs.slice().sort((a, b) => (a.date < b.date ? 1 : -1));
 
       lines.push("入油記錄");
-      lines.push(["日期", "油品", "實付", "里程", "升數", "牌價", "卡折每升", "油券面值", "油券張數", "入滿"].map(csvCell).join(","));
-      fillSorted.forEach((x, i) => {
+      lines.push(["日期", "油品", "實付", "行駛里程", "升數", "牌價", "卡折每升", "油券面值", "油券張數", "入滿", "總里程"].map(csvCell).join(","));
+      fillSorted.forEach((x) => {
         lines.push([
           x.date,
           fuelLabel(x.fuel),
-          "HK$" + neat(Number(x.paid) || 0, 2),
-          neat(Number(x.km) || 0, 1) + " km",
-          x.litres, x.pumpPrice, x.cardDiscount, x.voucherValue, x.voucherSheets, x.fullTank == null ? "" : x.fullTank ? "是" : "否"
+          Number(x.paid) || 0,
+          Number.isFinite(x.resolvedKm) ? Number(x.resolvedKm.toFixed(1)) : "",
+          x.litres == null ? "" : x.litres,
+          x.pumpPrice == null ? "" : x.pumpPrice,
+          x.cardDiscount == null ? "" : x.cardDiscount,
+          x.voucherValue == null ? "" : x.voucherValue,
+          x.voucherSheets == null ? "" : x.voucherSheets,
+          x.fullTank == null ? "" : x.fullTank ? "是" : "否",
+          Number(x.odo) || ""
         ].map(csvCell).join(","));
-        if (i < fillSorted.length - 1) lines.push(""); // 每條之間空一行
       });
       lines.push("");
       lines.push("維修記錄");
       lines.push(["年月", "項目", "里程", "使費"].map(csvCell).join(","));
-      repairSorted.forEach((x, i) => {
-        lines.push([x.date, x.item, neat(Number(x.km) || 0, 1) + " km", "HK$" + neat(Number(x.cost) || 0, 2)].map(csvCell).join(","));
-        if (i < repairSorted.length - 1) lines.push("");
+      repairSorted.forEach((x) => {
+        lines.push([x.date, x.item, Number(x.km) || "", Number(x.cost) || 0].map(csvCell).join(","));
       });
+
+      // 消耗品：逐筆更換歷史（呢個先係真正計落開支嘅數）
+      const histRows = (typeof consumHistoryRows === "function" ? consumHistoryRows() : [])
+        .slice()
+        .sort((a, b) => String(b.replacement_date).localeCompare(String(a.replacement_date)));
+      lines.push("");
+      lines.push("消耗品更換歷史");
+      lines.push(["日期", "項目", "里程", "使費"].map(csvCell).join(","));
+      histRows.forEach((r) => {
+        const c = (typeof CONSUMABLES !== "undefined" ? CONSUMABLES : []).find((x) => x.id === r.item_id);
+        lines.push([
+          r.replacement_date,
+          c ? c.name : r.item_id,
+          r.mileage == null ? "" : Number(r.mileage),
+          Number(r.cost) || 0
+        ].map(csvCell).join(","));
+      });
+
       lines.push("");
       lines.push("消耗品上次更換");
       lines.push(["項目", "上次更換"].map(csvCell).join(","));
       const consumRows = (typeof CONSUMABLES !== "undefined" ? CONSUMABLES : []).filter(
-        (c) => consumState.km[c.id] !== undefined && consumState.km[c.id] !== ""
+        (c) => consumState.km[c.id] !== undefined && consumState.km[c.id] !== "" && consumState.km[c.id] !== null
       );
-      consumRows.forEach((c, i) => {
+      consumRows.forEach((c) => {
         const v = consumState.km[c.id];
-        lines.push([c.name || c.id, c.dateBased ? v : neat(Number(v), 1) + " km"].map(csvCell).join(","));
-        if (i < consumRows.length - 1) lines.push("");
+        lines.push([c.name || c.id, c.dateBased ? v : Number(v)].map(csvCell).join(","));
       });
+
+      // 固定開支／到期（牌費、保險、驗車、港車北上、港北保險、停車場）
+      lines.push("");
+      lines.push("固定開支及到期");
+      lines.push(["項目", "繳費日", "到期日", "金額"].map(csvCell).join(","));
+      const dueLabel = (kind) => (typeof DUE_KINDS !== "undefined" && DUE_KINDS[kind]) || kind;
+      (typeof ANNUAL_KINDS !== "undefined" ? ANNUAL_KINDS : []).forEach((kind) => {
+        const r = latestOf(kind);
+        if (!r) return;
+        lines.push([dueLabel(kind), r.date, dueEndDate(r.date, 12) || "", Number(r.amount) || 0].map(csvCell).join(","));
+      });
+      (duesCache || []).filter((r) => r.kind === "parking")
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+        .forEach((r) => {
+          lines.push([dueLabel("parking"), r.date, dueEndDate(r.date, 1) || "", Number(r.amount) || 0].map(csvCell).join(","));
+        });
 
       const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
@@ -7122,6 +7329,16 @@
       animClose(document.getElementById("dueRemindModal"));
     }
 
+    // 2026-11-01：到期頁顯示「剩 N 日／今日到期／已過期 N 日」
+    function dueCountdownHtml(due, kind) {
+      const days = daysUntilYMD(due);
+      if (days == null) return "";
+      if (days < 0) return ' <span class="due-countdown over">已過期 ' + (-days) + " 日</span>";
+      if (days === 0) return ' <span class="due-countdown soon">今日到期</span>';
+      const limit = (DUE_REMIND_DAYS && DUE_REMIND_DAYS[kind]) || 30;
+      return ' <span class="due-countdown ' + (days <= limit ? "soon" : "ok") + '">剩 ' + days + " 日</span>";
+    }
+
     function renderDues() {
       // 年費各項：每項淨顯示最新一筆
       const viewMap = {
@@ -7137,7 +7354,7 @@
         el.innerHTML =
           (r.note ? escHtml(r.note) + "　" : "") +
           '繳 ' + escHtml(r.date) + "　→　到期 " + escHtml(next) +
-          '　<strong>HK$' + neat(r.amount, 2) + "</strong>";
+          '　<strong>HK$' + neat(r.amount, 2) + "</strong>" + dueCountdownHtml(next, kind);
       });
 
       // 停車場：逐筆記錄（可刪）
@@ -7154,7 +7371,7 @@
             return (
               '<div class="due-line row-in">' +
                 '<span><div class="due-meta">繳 ' + escHtml(r.date) +
-                  (next ? "　→　下期 " + escHtml(next) : "") + "</div></span>" +
+                  (next ? "　→　下期 " + escHtml(next) + dueCountdownHtml(next, "parking") : "") + "</div></span>" +
                 '<span class="fu-right">' +
                   '<span class="fu-amt">HK$' + neat(r.amount, 2) + "</span>" +
                   '<button type="button" class="row-del" data-del-due="' + String(r.id == null ? "" : r.id) + '">刪</button>' +
@@ -7517,6 +7734,8 @@
     let historyCache = [];
     let syncInFlight = false;
     let lastSyncError = "";
+    // 2026-11-01：本機儲存空間不足時，暫停自動重試，避免每 30 秒重送同一個操作
+    let pendingPersistBlocked = false;
     function pendingOperations(uid = appState.user && appState.user.id) {
       if (!uid) return [];
       try { const rows = JSON.parse(localStorage.getItem(SYNC_QUEUE_PREFIX + uid) || "[]"); return Array.isArray(rows) ? rows : []; }
@@ -7524,7 +7743,15 @@
     }
     function writePending(uid, rows) {
       // 唔吞儲存錯誤：本機存唔到就唔好假報已儲存。
-      localStorage.setItem(SYNC_QUEUE_PREFIX + uid, JSON.stringify(rows));
+      try {
+        localStorage.setItem(SYNC_QUEUE_PREFIX + uid, JSON.stringify(rows));
+      } catch (e) {
+        // 2026-11-01：空間不足／私密瀏覽時明確報錯，並記住「本機寫唔到」，
+        // 令 flushPending 之後唔會每一輪都重送同一個操作。
+        pendingPersistBlocked = true;
+        throw new Error("本機儲存空間不足（或私密瀏覽），待同步清單未能更新。");
+      }
+      pendingPersistBlocked = false;
       renderPendingStatus();
     }
     function makeOperation(kind, payload) {
@@ -7554,23 +7781,30 @@
       const blocked = operations.filter((r) => r.blocked);
       const firstError = blocked.length ? String(blocked[0].last_error || "資料格式有問題").slice(0, 70) : "";
       box.textContent = !appState.user ? "登入後會繼續補傳待同步記錄。"
-        : blocked.length
-          ? "⚠ 有 " + blocked.length + " 筆未能同步（" + firstError + "）· 已暫存此裝置 · 另外 " + (count - blocked.length) + " 筆待同步"
-          : count
-            ? "待同步 " + count + " 筆 · " + (syncInFlight ? "正在補傳…" : "已保存在此裝置，連線後自動補傳") + (lastSyncError ? "（" + lastSyncError + "）" : "")
-            : "所有已儲存記錄已同步 ✓";
+        : pendingPersistBlocked
+          ? "⚠ 本機儲存空間不足（或私密瀏覽），待同步記錄未能更新。清空間或關閉私密瀏覽後撳「重新嘗試」。"
+          : blocked.length
+            ? "⚠ 有 " + blocked.length + " 筆未能同步（" + firstError + "）· 已暫存此裝置 · 另外 " + (count - blocked.length) + " 筆待同步"
+            : count
+              ? "待同步 " + count + " 筆 · " + (syncInFlight ? "正在補傳…" : "已保存在此裝置，連線後自動補傳") + (lastSyncError ? "（" + lastSyncError + "）" : "")
+              : "所有已儲存記錄已同步 ✓";
       let main = document.getElementById("pendingSyncMain");
       if (!main) { main = document.createElement("div"); main.id = "pendingSyncMain"; main.className = "sync-line"; main.setAttribute("role","status");
         const footer = document.getElementById("footerInfo"); if (footer) footer.before(main); }
-      main.textContent = appState.user && count
-        ? (blocked.length
-            ? "⚠ 有 " + blocked.length + " 筆未能同步，請撳「重試受阻記錄」；資料仍保存在此裝置"
-            : "待同步 " + count + " 筆 · 已存此裝置，連線後自動補傳")
+      main.textContent = appState.user
+        ? (pendingPersistBlocked
+            ? "⚠ 本機儲存空間不足，待同步記錄寫唔到本機；請清空間或關私密瀏覽"
+            : count
+              ? (blocked.length
+                  ? "⚠ 有 " + blocked.length + " 筆未能同步，請撳「重試受阻記錄」；資料仍保存在此裝置"
+                  : "待同步 " + count + " 筆 · 已存此裝置，連線後自動補傳")
+              : "")
         : "";
-      if (count && !syncInFlight && uid) {
+      if ((count || pendingPersistBlocked) && !syncInFlight && uid) {
         const button = document.createElement("button"); button.type = "button"; button.className = "retry-mini";
-        button.textContent = blocked.length ? "重試受阻記錄" : "立即重試";
+        button.textContent = pendingPersistBlocked ? "重新嘗試" : blocked.length ? "重試受阻記錄" : "立即重試";
         button.onclick = () => {
+          if (pendingPersistBlocked) { pendingPersistBlocked = false; lastSyncError = ""; }
           if (blocked.length) {
             const rows = pendingOperations(uid).map((r) => r.blocked ? Object.assign({}, r, { blocked: false, attempts: 0 }) : r);
             try { writePending(uid, rows); } catch (e) {}
@@ -7617,9 +7851,22 @@
     }
     async function flushPending() {
       if (syncInFlight || !sb || !appState.user) return false;
+      // 2026-11-01：本機寫唔到（空間不足／私密瀏覽）就暫停自動重試，
+      // 否則每 30 秒／每次上線都會重送同一筆操作。
+      if (pendingPersistBlocked) {
+        lastSyncError = "本機儲存空間不足（或私密瀏覽），待同步清單寫唔到";
+        renderPendingStatus();
+        return false;
+      }
       const uid = appState.user.id;
       syncInFlight = true; lastSyncError = ""; renderPendingStatus();
       let changed = false;
+      let persistFailed = false;
+      // 2026-11-01：本機寫唔到（空間不足／私密瀏覽）就停手，唔好無限重試同一個操作
+      const persist = (nextRows) => {
+        try { writePending(uid, nextRows); return true; }
+        catch (e) { pendingPersistBlocked = true; lastSyncError = "本機儲存空間不足（或私密瀏覽），待同步清單未能更新"; console.warn(e.message); return false; }
+      };
       try {
         while (appState.user && appState.user.id === uid) {
           const rows = pendingOperations(uid);
@@ -7635,16 +7882,17 @@
             if (isTransientSyncError(error) && attempts < 6) {
               // 網絡問題：記低次數，停手等下次自動重試
               next[index] = Object.assign({}, op, { attempts, last_error: syncErrorMessage(error) });
-              writePending(uid, next);
+              if (!persist(next)) { persistFailed = true; break; }
               throw error;
             }
             // 資料問題（或重試太多次）：標記受阻，跳過呢筆繼續送後面，唔好卡死隊列
             next[index] = Object.assign({}, op, { attempts, last_error: syncErrorMessage(error), blocked: true });
-            writePending(uid, next);
+            if (!persist(next)) { persistFailed = true; break; }
             console.warn("pending op blocked:", op.kind, syncErrorMessage(error));
             continue;
           }
-          writePending(uid, rows.filter((r) => r.id !== op.id)); changed = true;
+          if (!persist(rows.filter((r) => r.id !== op.id))) { persistFailed = true; break; }
+          changed = true;
         }
       } catch (e) {
         lastSyncError = isTransientSyncError(e) ? "暫時連唔到雲端，稍後自動重試" : "同步受阻：" + syncErrorMessage(e);
@@ -7656,7 +7904,7 @@
         renderExpenseSummary();
         if (!document.getElementById("expenseTrendModal").classList.contains("hidden")) loadExpenseTrends();
       }
-      return pendingOperations(uid).length === 0;
+      return !persistFailed && pendingOperations(uid).length === 0;
     }
     async function saveQueued(kind, payload) {
       enqueueOperation(makeOperation(kind, payload));
