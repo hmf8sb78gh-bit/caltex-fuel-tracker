@@ -296,7 +296,8 @@ def main():
 
         if existing:
             print("Keeping existing oilprice.json.")
-            return
+            # 2026-11-01：失敗要令 GitHub Actions 變紅（否則油價停更新都冇人知）
+            raise SystemExit(1)
 
         payload = {
             "source": "香港消費者委員會油價資訊通",
@@ -310,6 +311,7 @@ def main():
             json.dump(payload, f, ensure_ascii=False, indent=2)
 
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
