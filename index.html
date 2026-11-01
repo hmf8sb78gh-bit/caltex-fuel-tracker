@@ -431,6 +431,24 @@
       color: #fbbf24;
     }
 
+    .k-note {
+      font-size: 0.72em;
+      font-weight: 700;
+      color: var(--muted2);
+      margin-left: 4px;
+    }
+
+    /* 2026-11-01：累計／近 3,000 km 平均每公里（唔入滿都穩定） */
+    .avg-line {
+      margin-top: 6px;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    body.light .avg-line { color: #475569; }
+    body.light .k-note { color: #64748b; }
+
     .interval-line.ok {
       color: #86efac;
     }
@@ -2611,7 +2629,7 @@
               <div class="v" id="cloudLastOdometer">--</div>
             </div>
             <div class="cloud-cell">
-              <div class="k">上次每公里油費</div>
+              <div class="k">平均每公里（到上次儲存）</div>
               <div class="v" id="cloudLastConsumption">--</div>
             </div>
             <div class="cloud-cell cloud-cell-full">
@@ -2869,7 +2887,7 @@
         </div>
 
         <div class="result main has-prev">
-          <div class="k">今次付款 / 行駛公里</div>
+          <div class="k">今次付款 / 行駛公里<span class="k-note">逐次估算</span></div>
           <div class="v" id="resultCostPerKm">--</div>
           <span class="prev-badge" id="resultPrevCost"></span>
         </div>
@@ -2886,7 +2904,8 @@
         </div>
       </div>
 
-      <p class="small">今次付款 ÷ 今次行駛距離，只供開支參考；實測油耗按兩次滿缸之間嘅完整升數計算。</p>
+      <p class="small">今次付款 ÷ 今次行駛距離，只供開支參考（唔入滿時會逐次跳）；實測油耗按兩次滿缸之間嘅完整升數計算。</p>
+      <p class="avg-line" id="avgCostLine" style="display:none;"></p>
       <p class="interval-line" id="intervalLine" style="display:none;"></p>
 
       <button type="button" class="btn green result-save" id="saveOdometerBtn">儲存</button>
@@ -3826,6 +3845,61 @@
       return { distance: getDistanceKm(), paid: values.payable, saved: false };
     }
 
+    // 2026-11-01：唔入滿時，「逐次每公里」一定跳；用已儲存記錄計「累計」同「近 3,000 km」平均會穩定好多。
+    function fillupAverages(windowKm = 3000) {
+      const seen = new Set();
+      const rows = (fillupsListCache || []).concat(loadLocalFillups())
+        .filter((r) => {
+          if (!r || !r.date) return false;
+          const key = r.id != null ? String(r.id) : null;
+          if (key && seen.has(key)) return false;
+          if (key) seen.add(key);
+          return true;
+        })
+        .map((r) => ({
+          date: r.date,
+          paid: Number(r.paid) || 0,
+          km: Number(r.km) || 0,
+          odo: Number(r.odo) || 0,
+          litres: r.litres == null || r.litres === "" ? null : Number(r.litres)
+        }))
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.odo - b.odo);
+      let prevOdo = NaN;
+      const withDist = rows.map((r) => {
+        const d = resolveFillupDistance(
+          { odometer: r.odo > 0 ? r.odo : null, trip_km: r.km, litres: r.litres }, prevOdo).km;
+        if (r.odo > 0) prevOdo = r.odo;
+        return Object.assign({}, r, { dist: Number.isFinite(d) && d > 0 ? d : 0 });
+      });
+      const totalP = withDist.reduce((s, r) => s + r.paid, 0);
+      const totalD = withDist.reduce((s, r) => s + r.dist, 0);
+      let recentP = 0, recentD = 0;
+      for (let i = withDist.length - 1; i >= 0 && recentD < windowKm; i--) {
+        recentP += withDist[i].paid;
+        recentD += withDist[i].dist;
+      }
+      return {
+        count: withDist.length, totalP, totalD,
+        cum: totalD > 0 ? totalP / totalD : NaN,
+        recentP, recentD,
+        recent: recentD > 0 ? recentP / recentD : NaN
+      };
+    }
+
+    function updateAvgCostLine() {
+      if (typeof document === "undefined") return;
+      const el = document.getElementById("avgCostLine");
+      if (!el) return;
+      const a = fillupAverages();
+      if (!(a.totalD > 0)) { el.style.display = "none"; el.textContent = ""; return; }
+      const parts = ["累計 " + money(a.cum) + "/km（" + neat(a.totalD, 0) + " km、" + a.count + " 筆）"];
+      if (Number.isFinite(a.recent) && a.recentD >= 500) {
+        parts.push("近 " + neat(a.recentD, 0) + " km " + money(a.recent) + "/km");
+      }
+      el.textContent = "平均每公里：" + parts.join(" · ");
+      el.style.display = "";
+    }
+
     // 只有完整升數＋兩次滿缸，先可顯示實測油耗。累積開支另行標明。
     function getIntervalView(values) {
       const acc = appState.fullInterval;
@@ -3925,6 +3999,7 @@
       updatePrevCostBadge();
       updateMonthTotalLine();
       updateEntryDot();
+      if (typeof updateAvgCostLine === "function") updateAvgCostLine();
 
       const noPrice = !Number.isFinite(values.pumpPrice) || values.pumpPrice <= 0;
       const noLitres = !(values.litres > 0); // 2026-11-01：未輸入油量唔好顯示 HK$0
@@ -5394,11 +5469,16 @@
         return;
       }
       const tripKm = getDistanceKm();
-      let lastCostPerKm = Number.isFinite(tripKm) ? valuesNow.payable / tripKm : null;
 
       // 一併記低今次實付金額＋行駛里程（本機 + 雲端），並更新本月累計
       const paidNow = Number.isFinite(valuesNow.payable) ? valuesNow.payable : 0;
       const tripKmNow = Number.isFinite(tripKm) && tripKm > 0 ? tripKm : 0;
+
+      // 2026-11-01：「平均每公里」改用累計平均（唔入滿時逐次會跳 ±40%，累計約 ±5%）
+      const avgsBefore = typeof fillupAverages === "function" ? fillupAverages() : { totalP: 0, totalD: 0 };
+      const cumPaid = (Number(avgsBefore.totalP) || 0) + paidNow;
+      const cumDist = (Number(avgsBefore.totalD) || 0) + tripKmNow;
+      const lastCostPerKm = cumDist > 0 ? cumPaid / cumDist : null;
       const hasFillup = paidNow > 0 || tripKmNow > 0;
       if (hasFillup) {
         // 重複防呆：同日同金額同里程再儲，問一問先好入賬
@@ -6593,8 +6673,9 @@
       const clearAll = rows.length === 0;
 
       if (rows.length) {
-        const latest = rows[0];
-        lastCons = latest.km > 0 ? latest.paid / latest.km : null;
+        // 2026-11-01：刪完記錄後，用剩餘記錄重算「累計平均每公里」（唔再用單次）
+        const avgs = typeof fillupAverages === "function" ? fillupAverages() : null;
+        lastCons = avgs && avgs.totalD > 0 ? avgs.cum : null;
         // 累計總里程只升唔跌，攞全部剩餘記錄入面最大嗰個（最穩陣）
         let maxOdo = 0;
         rows.forEach((r) => { if (Number(r.odo) > maxOdo) maxOdo = Number(r.odo); });
