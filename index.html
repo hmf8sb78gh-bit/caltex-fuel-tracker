@@ -2745,11 +2745,11 @@
         <div>
           <label for="discountCard">折扣卡</label>
           <select id="discountCard">
+            <option value="12,13">私人能源卡：黃金減$12 / 白金減$13</option>
             <option value="11,12">私人能源卡：黃金減$11 / 白金減$12</option>
-            <option value="10,11">一般折扣：黃金減$10 / 白金減$11</option>
-            <option value="9,10">一般折扣：黃金減$9 / 白金減$10</option>
+            <option value="11.5,12">私人能源卡：黃金減$11.5 / 白金減$12</option>
             <option value="0,0">沒有折扣卡</option>
-            <option value="custom">自訂折扣</option>
+            <option value="custom">其他私人能源卡（自己輸入折扣）</option>
           </select>
         </div>
 
@@ -3394,6 +3394,8 @@
         }
 
         if (data.discountCard != null) els.discountCard.value = data.discountCard;
+        // 2026-11-01：舊存檔嘅折扣卡數值如果已經唔存在，退回第一個選項，避免靜靜變成 0 折扣
+        if (!els.discountCard.value) els.discountCard.value = els.discountCard.options[0].value;
         if (data.customDiscount != null) els.customDiscount.value = data.customDiscount;
 
         if (data.voucher != null) els.voucher.value = data.voucher;
